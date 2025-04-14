@@ -9,6 +9,7 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
     const [email, setEmail] = useState<string>('');
     const [password, setPassword] = useState<string>('');
     const [confirmPassword, setConfirmPassword] = useState<string>('');
+    const [fullName, setFullName] = useState<string>('');
     const [error, setError] = useState<string>('');
     const [successMessage, setSuccessMessage] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -17,13 +18,14 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
         event.preventDefault();
         setError('');
         setSuccessMessage('');
+        if (!fullName.trim()) { setError('Full name is required.'); return; }
         if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
         if (password.length < 8) { setError('Password must be at least 8 characters long.'); return; }
         setIsLoading(true);
         try {
-            const response = await axios.post('http://localhost:5001/api/auth/register', { email, password });
+            const response = await axios.post('http://localhost:5001/api/auth/register', { email, password, fullName });
             setSuccessMessage(response.data.message || 'Registration successful! Please log in.');
-            setEmail(''); setPassword(''); setConfirmPassword('');
+            setEmail(''); setPassword(''); setConfirmPassword(''); setFullName('');
         } catch (err: any) {
             if (err.response?.data?.errors) {
                 const messages = err.response.data.errors.map((e: any) => e.msg).join(', ');
@@ -35,13 +37,27 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
     };
 
     return (
-        <div className="container container-sm">
-            <div className="card" style={{marginTop: 'var(--spacing-2xl)'}}>
+        <div className="auth-container">
+            <div className="auth-card">
                 <div className="card-header">
                     <h2 className="text-center" style={{margin: 0}}>Create Account</h2>
                 </div>
                 <div className="card-body">
                     <form onSubmit={handleSubmit}>
+                        <div className="form-group">
+                            <label className="form-label" htmlFor="register-fullname">Full Name</label>
+                            <input
+                                type="text"
+                                id="register-fullname"
+                                className="form-control"
+                                value={fullName}
+                                onChange={(e) => setFullName(e.target.value)}
+                                required
+                                disabled={isLoading}
+                                placeholder="Enter your full name"
+                                autoComplete="name"
+                            />
+                        </div>
                         <div className="form-group">
                             <label className="form-label" htmlFor="register-email">Email Address</label>
                             <input 
@@ -53,9 +69,9 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
                                 required 
                                 disabled={isLoading}
                                 placeholder="Enter your email"
+                                autoComplete="email"
                             />
                         </div>
-                        
                         <div className="form-group">
                             <label className="form-label" htmlFor="register-password">Password (min 8 characters)</label>
                             <input 
@@ -67,9 +83,9 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
                                 required 
                                 disabled={isLoading}
                                 placeholder="Create a password"
+                                autoComplete="new-password"
                             />
                         </div>
-                        
                         <div className="form-group">
                             <label className="form-label" htmlFor="register-confirm-password">Confirm Password</label>
                             <input 
@@ -81,33 +97,19 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
                                 required 
                                 disabled={isLoading}
                                 placeholder="Confirm your password"
+                                autoComplete="new-password"
                             />
                         </div>
-                        
                         {error && (
-                            <div style={{
-                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                color: 'var(--error)',
-                                padding: 'var(--spacing-md)',
-                                borderRadius: 'var(--radius-md)',
-                                marginBottom: 'var(--spacing-lg)'
-                            }}>
+                            <div className="error-message" style={{marginBottom: 'var(--spacing-lg)'}}>
                                 {error}
                             </div>
                         )}
-
                         {successMessage && (
-                            <div style={{
-                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                color: 'var(--success)',
-                                padding: 'var(--spacing-md)',
-                                borderRadius: 'var(--radius-md)',
-                                marginBottom: 'var(--spacing-lg)'
-                            }}>
+                            <div className="success-message" style={{marginBottom: 'var(--spacing-lg)'}}>
                                 {successMessage}
                             </div>
                         )}
-                        
                         <button 
                             type="submit" 
                             className="btn btn-primary" 
@@ -121,10 +123,18 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
                             ) : 'Create Account'}
                         </button>
                     </form>
-
                     <div className="text-center mt-2">
                         <p>Already have an account? <Link to="/login">Sign in</Link></p>
                     </div>
+                </div>
+            </div>
+            <div className="auth-banner">
+                <h2>Join InvestAnalyzer</h2>
+                <p>Create an account to get access to our AI-powered investment analysis tools.</p>
+                <div className="auth-banner-decoration">
+                    <div className="decoration-line"></div>
+                    <div className="decoration-dot"></div>
+                    <div className="decoration-ring"></div>
                 </div>
             </div>
         </div>

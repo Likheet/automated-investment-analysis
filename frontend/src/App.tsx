@@ -53,7 +53,7 @@ function AppContent(): React.ReactElement {
         <div className="app-container">
             <header className="header" style={{ backgroundColor: 'var(--header-bg)', borderColor: 'var(--header-border)' }}>
                 <div className="logo-container">
-                    <span className="app-logo">KaroStartup Analyzer</span>
+                    <span className="app-logo">InvestAnalyzer</span>
                 </div>
                 <nav className="nav-links">
                     <ThemeToggle />
@@ -102,7 +102,7 @@ function AppContent(): React.ReactElement {
                                     <RegisterPage />
                                 </div>
                                 <div className="auth-banner">
-                                    <h2>Join KaroStartup Analyzer</h2>
+                                    <h2>Join InvestAnalyzer</h2>
                                     <p>Create an account to get access to our AI-powered investment analysis tools.</p>
                                     <div className="auth-banner-decoration">
                                         <div className="decoration-line"></div>
@@ -214,9 +214,9 @@ function AppContent(): React.ReactElement {
                 <div className="footer-container">
                     <div className="footer-info">
                         <div className="footer-logo">
-                            <span className="app-logo">KaroStartup Analyzer</span>
+                            <span className="app-logo">InvestAnalyzer</span>
                         </div>
-                        <p>© {new Date().getFullYear()} KaroStartup Analyzer | All rights reserved</p>
+                        <p>© {new Date().getFullYear()} InvestAnalyzer | All rights reserved</p>
                     </div>
                     <div className="footer-sections">
                         <div className="footer-section">

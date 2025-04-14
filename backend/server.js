@@ -9,7 +9,8 @@ const { spawn } = require('child_process');
 const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses"); // SES Client
+const FormData = require('form-data');
+const Mailgun = require('mailgun.js');
 const PDFDocument = require('pdfkit');
 const { format } = require('date-fns');
 const rateLimit = require('express-rate-limit'); // Rate Limiting
@@ -36,9 +37,11 @@ const s3Client = new S3Client({
 });
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
 
-// AWS SES
-const sesClient = new SESClient({ region: process.env.AWS_REGION }); // SES Client Init
-const FROM_EMAIL = process.env.SES_FROM_EMAIL;
+// Mailgun
+const mailgun = new Mailgun(FormData);
+const mg = mailgun.client({username: 'api', key: process.env.MAILGUN_API_KEY});
+const FROM_EMAIL = process.env.FROM_EMAIL;
+const MAILGUN_DOMAIN = 'sandbox47a73d27a48448629f7f866e86ebcda7.mailgun.org';
 
 // Google Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -321,110 +324,174 @@ async function updateAnalysisStatus(analysisId, status, failureReason = null) {
     }
 }
 
+async function updateEmailStatus(analysisId, status, failureReason = null) {
+    const query = `
+        UPDATE analysis_results
+        SET email_status = $1,
+            email_failure_reason = $2,
+            updated_at = NOW()
+        WHERE id = $3;
+    `;
+    const values = [status, failureReason, analysisId];
+    let client;
+    try {
+        client = await pool.connect();
+        await client.query(query, values);
+        console.log(`Updated email status for Analysis ID ${analysisId} to ${status}`);
+        return true;
+    } catch (error) {
+        console.error(`Error updating email status for Analysis ID ${analysisId}:`, error.stack);
+        return false;
+    } finally {
+        if (client) client.release();
+    }
+}
+
 async function generateInvestmentThesisPDF(analysisData, analysisId, originalFileName) {
      return new Promise((resolve, reject) => {
-         let startupName = path.basename(originalFileName, path.extname(originalFileName)).replace(/[^a-zA-Z0-9\-_ ]/g, '_').replace(/ /g, '_');
-         startupName = (!startupName || startupName.length > 50) ? `StartupAnalysis_${analysisId}` : startupName;
-         const processingDate = new Date();
-         const formattedDate = format(processingDate, 'dd-MM-yyyy HH:mm:ss \'UTC\'');
-         const reportDateFilename = format(processingDate, 'ddMMyyyy');
-         const pdfFilename = `Investment_Thesis_${startupName}_${reportDateFilename}.pdf`;
-         const pdfTempPath = path.join(tempReportsDir, pdfFilename);
+         try {
+             let startupName = path.basename(originalFileName, path.extname(originalFileName)).replace(/[^a-zA-Z0-9\-_ ]/g, '_').replace(/ /g, '_');
+             startupName = (!startupName || startupName.length > 50) ? `StartupAnalysis_${analysisId}` : startupName;
+             const processingDate = new Date();
+             const formattedDate = format(processingDate, 'dd-MM-yyyy HH:mm:ss \'UTC\'');
+             const reportDateFilename = format(processingDate, 'ddMMyyyy');
+             const pdfFilename = `Investment_Thesis_${startupName}_${reportDateFilename}.pdf`;
+             const pdfTempPath = path.join(tempReportsDir, pdfFilename);
 
-         const doc = new PDFDocument({ size: 'A4', margins: { top: 50, bottom: 50, left: 60, right: 60 }, bufferPages: true });
-         const writeStream = fs.createWriteStream(pdfTempPath);
-         doc.pipe(writeStream);
-         writeStream.on('error', (err) => { doc.end(); reject(new Error(`Failed to write PDF: ${err.message}`)); });
-         writeStream.on('finish', () => { console.log(`PDF written locally: ${pdfTempPath}`); resolve({ localPath: pdfTempPath, reportFilename: pdfFilename }); });
+             // Make sure the temporary directory exists
+             if (!fs.existsSync(tempReportsDir)) {
+                 fs.mkdirSync(tempReportsDir, { recursive: true });
+                 console.log(`Created temporary reports directory: ${tempReportsDir}`);
+             }
 
-         // Styles & Helpers
-         const H1 = 14, H2 = 12, P = 11, Font = 'Helvetica', FontBold = 'Helvetica-Bold';
-         const addH1 = (txt) => doc.font(FontBold).fontSize(H1).text(txt, { paragraphGap: 5 }).moveDown(0.5);
-         const addH2 = (txt) => doc.font(FontBold).fontSize(H2).text(txt, { paragraphGap: 3 }).moveDown(0.3);
-         const addSubHeading = (txt) => doc.font(FontBold).fontSize(P).text(txt, { paragraphGap: 2 }).moveDown(0.2);
-         const addP = (txt, opts={}) => doc.font(Font).fontSize(P).text(txt, { paragraphGap: 3, align: opts.align || 'justify', indent: opts.indent || 0, ...opts }).moveDown(0.5);
-         const addBullet = (txt) => addP(`• ${txt}`, {indent: 0});
+             console.log(`Generating PDF for analysis ID: ${analysisId} at path: ${pdfTempPath}`);
 
-         // --- PDF Content Sections ---
+             const doc = new PDFDocument({ size: 'A4', margins: { top: 50, bottom: 50, left: 60, right: 60 }, bufferPages: true });
+             const writeStream = fs.createWriteStream(pdfTempPath);
+             doc.pipe(writeStream);
+             
+             writeStream.on('error', (err) => { 
+                 console.error(`Error writing PDF to ${pdfTempPath}:`, err);
+                 doc.end(); 
+                 reject(new Error(`Failed to write PDF: ${err.message}`)); 
+             });
+             
+             writeStream.on('finish', () => { 
+                 console.log(`PDF written successfully to: ${pdfTempPath}`); 
+                 resolve({ localPath: pdfTempPath, reportFilename: pdfFilename }); 
+             });
 
-         // Summary
-         addH1("Investment Thesis Summary");
-         addP(`Startup: ${startupName}`);
-         addP(`Processing Date: ${formattedDate}`);
-         addSubHeading("Recommendation:"); addP(analysisData?.recommendation || "N/A", { indent: 20 });
-         addSubHeading("Overall Score:"); addP(`${calculateOverallScore(analysisData)} / 100`, { indent: 20 });
-         doc.moveDown(1);
+             // Styles & Helpers
+             const H1 = 14, H2 = 12, P = 11, Font = 'Helvetica', FontBold = 'Helvetica-Bold';
+             const addH1 = (txt) => doc.font(FontBold).fontSize(H1).text(txt, { paragraphGap: 5 }).moveDown(0.5);
+             const addH2 = (txt) => doc.font(FontBold).fontSize(H2).text(txt, { paragraphGap: 3 }).moveDown(0.3);
+             const addSubHeading = (txt) => doc.font(FontBold).fontSize(P).text(txt, { paragraphGap: 2 }).moveDown(0.2);
+             const addP = (txt, opts={}) => doc.font(Font).fontSize(P).text(txt, { paragraphGap: 3, align: opts.align || 'justify', indent: opts.indent || 0, ...opts }).moveDown(0.5);
+             const addBullet = (txt) => addP(`• ${txt}`, {indent: 0});
 
-          // Categories
-          addH1("Category Analysis");
-          const categoryWeights = { "Problem Statement": 10, "Solution/Product": 15, "Market Opportunity": 20, "Business Model": 15, "Competitive Landscape": 10, "Team": 15, "Traction/Milestones": 10, "Financial Projections": 10, "Clarity and Presentation (Text only)": 5 };
-          for (const category in categoryWeights) {
-              const catData = analysisData?.[category];
-              addH2(`${category} (${categoryWeights[category]}%)`, { underline: true });
-              if (catData) {
-                  addSubHeading("Score:"); addP(`${catData.score ?? 'N/A'} / 10`, { indent: 20 });
-                  addSubHeading("Feedback:"); addP(catData.qualitative_feedback || "No feedback.", { indent: 20 });
-              } else { addP("Analysis data missing for this category.", { indent: 20, oblique: true }); }
-               doc.moveDown(0.7);
-          }
-          doc.moveDown(1);
+             // --- PDF Content Sections ---
 
-          // Strengths & Weaknesses
-          addH1("Overall Strengths & Weaknesses");
-          addSubHeading("Strengths:"); (analysisData?.overall_strengths?.length > 0 ? analysisData.overall_strengths : ["None explicitly identified."]).forEach(s => addBullet(s)); doc.moveDown(0.5);
-          addSubHeading("Weaknesses:"); (analysisData?.overall_weaknesses?.length > 0 ? analysisData.overall_weaknesses : ["None explicitly identified."]).forEach(w => addBullet(w)); doc.moveDown(1);
+             // Summary
+             addH1("Investment Thesis Summary");
+             addP(`Startup: ${startupName}`);
+             addP(`Processing Date: ${formattedDate}`);
+             addSubHeading("Recommendation:"); addP(analysisData?.recommendation || "N/A", { indent: 20 });
+             addSubHeading("Overall Score:"); addP(`${calculateOverallScore(analysisData)} / 100`, { indent: 20 });
+             doc.moveDown(1);
 
-          // Recommendations (Note: Mismatch in Spec/Gemini output name? Assuming 'recommendations' from spec text field vs 'recommendation' single choice. Using single choice value for now.)
-          addH1("Detailed Recommendations"); // Adjusted heading
-          addP(analysisData?.recommendations || "No specific recommendations provided beyond the overall guidance."); // Check if Gemini prompt needs update for this field if required
-          doc.moveDown(1);
+              // Categories
+              addH1("Category Analysis");
+              const categoryWeights = { "Problem Statement": 10, "Solution/Product": 15, "Market Opportunity": 20, "Business Model": 15, "Competitive Landscape": 10, "Team": 15, "Traction/Milestones": 10, "Financial Projections": 10, "Clarity and Presentation (Text only)": 5 };
+              for (const category in categoryWeights) {
+                  const catData = analysisData?.[category];
+                  addH2(`${category} (${categoryWeights[category]}%)`, { underline: true });
+                  if (catData) {
+                      addSubHeading("Score:"); addP(`${catData.score ?? 'N/A'} / 10`, { indent: 20 });
+                      addSubHeading("Feedback:"); addP(catData.qualitative_feedback || "No feedback.", { indent: 20 });
+                  } else { addP("Analysis data missing for this category.", { indent: 20, oblique: true }); }
+                   doc.moveDown(0.7);
+              }
+              doc.moveDown(1);
 
-          // Confidence Score
-          addH1("AI Analysis Confidence");
-          addSubHeading("Score:"); addP(`${analysisData?.confidence_score ?? 'N/A'} / 100`, { indent: 20 });
-          addP("Basis: Reflects AI certainty based on text completeness and coherence. Does not guarantee investment success.", { indent: 20 });
+              // Strengths & Weaknesses
+              addH1("Overall Strengths & Weaknesses");
+              addSubHeading("Strengths:"); 
+              if (Array.isArray(analysisData?.overall_strengths) && analysisData.overall_strengths.length > 0) {
+                  analysisData.overall_strengths.forEach(s => addBullet(s));
+              } else {
+                  addBullet("None explicitly identified.");
+              }
+              doc.moveDown(0.5);
+              
+              addSubHeading("Weaknesses:"); 
+              if (Array.isArray(analysisData?.overall_weaknesses) && analysisData.overall_weaknesses.length > 0) {
+                  analysisData.overall_weaknesses.forEach(w => addBullet(w));
+              } else {
+                  addBullet("None explicitly identified.");
+              }
+              doc.moveDown(1);
 
-         // Footer (Page Numbers)
-         const range = doc.bufferedPageRange();
-         for (let i = range.start; i <= (range.start + range.count - 1); i++) {
-            doc.switchToPage(i);
-            doc.font(Font).fontSize(9).text(`Page ${i + 1} of ${range.count}`, 50, doc.page.height - 40, { align: 'center' });
+              // Recommendations
+              addH1("Detailed Recommendations");
+              addP(analysisData?.recommendations || analysisData?.recommendation || "No specific recommendations provided beyond the overall guidance.");
+              doc.moveDown(1);
+
+              // Confidence Score
+              addH1("AI Analysis Confidence");
+              addSubHeading("Score:"); addP(`${analysisData?.confidence_score ?? 'N/A'} / 100`, { indent: 20 });
+              addP("Basis: Reflects AI certainty based on text completeness and coherence. Does not guarantee investment success.", { indent: 20 });
+
+             // Footer (Page Numbers)
+             const range = doc.bufferedPageRange();
+             for (let i = range.start; i <= (range.start + range.count - 1); i++) {
+                doc.switchToPage(i);
+                doc.font(Font).fontSize(9).text(`Page ${i + 1} of ${range.count}`, 50, doc.page.height - 40, { align: 'center' });
+             }
+
+             // Finalize
+             doc.end();
+         } catch (error) {
+             console.error(`Error generating PDF for analysis ${analysisId}:`, error);
+             reject(error);
          }
-
-         // Finalize
-         doc.end();
      }); // End Promise
 }
 
 async function sendCompletionEmail(recipientEmail, analysisId, deckS3Key, pdfS3Key) {
-    if (!FROM_EMAIL) { console.warn("SES_FROM_EMAIL not set, skipping email notification."); return; }
-    if (!recipientEmail) { console.warn(`No recipient email found for analysis ${analysisId}, skipping.`); return; }
+    if (!FROM_EMAIL) { 
+        console.warn("FROM_EMAIL not set, skipping email notification.");
+        await updateEmailStatus(analysisId, 'FAILED', 'FROM_EMAIL not configured');
+        return false; 
+    }
+    if (!recipientEmail) { 
+        console.warn(`No recipient email found for analysis ${analysisId}, skipping.`);
+        await updateEmailStatus(analysisId, 'FAILED', 'Recipient email missing');
+        return false; 
+    }
 
-    // Create a download URL that points to our new redirect endpoint
-    // NOTE: Replace 'http://localhost:5001' with your actual *public* backend URL when deployed
-    const backendBaseUrl = 'http://localhost:5001'; // !!! UPDATE ON DEPLOYMENT !!!
+    // Create a download URL that points to our redirect endpoint
+    const backendBaseUrl = 'http://localhost:5001';
     const downloadLink = `${backendBaseUrl}/api/analysis/report/${analysisId}/download`;
 
     const subject = `KaroStartup: Your Pitch Deck Analysis is Ready (ID: ${analysisId})`;
     const bodyText = `Your pitch deck analysis (Original Key: ${deckS3Key}) is complete.\n\nYou can download the PDF report here:\n${downloadLink}\n\nThank you for using KaroStartup!`;
     const bodyHtml = `<p>Your pitch deck analysis (Original Key: ${deckS3Key}) is complete.</p><p>You can download the PDF report using the button below (link expires in 5 minutes from generation time):</p><p><a href="${downloadLink}" style="padding:10px 15px; background-color:#007bff; color:white; text-decoration:none; border-radius:5px;">Download Report PDF</a></p><p><br/>Or copy this link: ${downloadLink}</p><p>Thank you for using KaroStartup!</p>`;
 
-    const params = {
-        Source: FROM_EMAIL,
-        Destination: { ToAddresses: [recipientEmail] },
-        Message: {
-            Subject: { Data: subject },
-            Body: { Text: { Data: bodyText }, Html: { Data: bodyHtml } }
-        }
-    };
-
     try {
-        const command = new SendEmailCommand(params);
-        await sesClient.send(command);
+        await mg.messages.create(MAILGUN_DOMAIN, {
+            from: `KaroStartup <${FROM_EMAIL}>`,
+            to: [recipientEmail],
+            subject: subject,
+            text: bodyText,
+            html: bodyHtml
+        });
         console.log(`Completion email sent to ${recipientEmail} for Analysis ID: ${analysisId}`);
+        await updateEmailStatus(analysisId, 'SENT');
+        return true;
     } catch (error) {
         console.error(`Failed to send completion email to ${recipientEmail} for Analysis ID ${analysisId}:`, error);
-        // Non-critical error usually, don't fail the whole request
+        await updateEmailStatus(analysisId, 'FAILED', error.message);
+        return false;
     }
 }
 

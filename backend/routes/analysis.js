@@ -2,13 +2,21 @@
 const express = require('express');
 const pool = require('../db');
 const authMiddleware = require('../middleware/authMiddleware');
-const { S3Client, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, GetObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 require('dotenv').config({ path: '../.env' });
 
 const router = express.Router();
 
-const s3Client = new S3Client({ region: process.env.AWS_REGION }); // Ensure AWS creds loaded
+// Enhanced S3 client initialization with explicit credentials
+const s3Client = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    }
+});
+
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
 
 // DELETE /api/analysis/record/:analysisId - Delete a specific analysis record
@@ -58,10 +66,11 @@ router.get('/history', authMiddleware, async (req, res) => {
     const userId = req.user.userId;
     console.log(`Fetching analysis history for User ID: ${userId}`);
     
-    // --- Added original_filename and processing_status ---
+    // Now include email_status and email_failure_reason
     const query = `
         SELECT id, s3_key, original_filename, pdf_s3_key,
-               overall_score, recommendation, processing_status, created_at
+               overall_score, recommendation, processing_status, created_at,
+               email_status, email_failure_reason
         FROM analysis_results WHERE user_id = $1 ORDER BY created_at DESC;
     `;
     
@@ -128,25 +137,66 @@ router.get('/report/:analysisId/download', authMiddleware, async (req, res) => {
     let client;
     try {
         client = await pool.connect();
-        const result = await client.query( 'SELECT pdf_s3_key FROM analysis_results WHERE id = $1 AND user_id = $2', [analysisId, userId]);
-        if (result.rows.length === 0) return res.status(404).json({ message: 'Report not found or access denied.' });
+        const result = await client.query(`
+            SELECT pdf_s3_key, processing_status, original_filename 
+            FROM analysis_results 
+            WHERE id = $1 AND user_id = $2
+        `, [analysisId, userId]);
+        
+        if (result.rows.length === 0) 
+            return res.status(404).json({ message: 'Report not found or access denied.' });
 
         const pdfS3Key = result.rows[0].pdf_s3_key;
-        if (!pdfS3Key) return res.status(404).json({ message: 'Report PDF not available yet.' });
+        const status = result.rows[0].processing_status;
+        const originalFilename = result.rows[0].original_filename;
 
-        // Check if the file exists in S3 before generating a URL
+        if (!pdfS3Key) 
+            return res.status(404).json({ message: 'Report PDF not available yet.' });
+
+        if (status === 'FAILED')
+            return res.status(400).json({ message: 'Analysis failed. No report available.' });
+
+        // Format a clean download filename
+        const cleanName = originalFilename 
+            ? originalFilename.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "_")
+            : `Analysis_${analysisId}`;
+        const downloadFilename = `KaroStartup_Thesis_${cleanName}_${analysisId}.pdf`;
+
+        // Check if S3 direct URL is requested
+        const useS3Direct = req.query.mode === 'direct';
+        
+        // Try S3 signed URL first
         try {
-            // Use HeadObject to check if the file exists without downloading it
-            const { HeadObjectCommand } = require("@aws-sdk/client-s3");
+            console.log(`Checking if file ${pdfS3Key} exists in S3...`);
             await s3Client.send(new HeadObjectCommand({
                 Bucket: BUCKET_NAME,
                 Key: pdfS3Key
             }));
-        } catch (s3Error) {
-            // File doesn't exist in S3
-            console.error(`File ${pdfS3Key} not found in S3:`, s3Error);
             
-            // Update the database to mark this report as unavailable
+            // Generate pre-signed URL for downloading
+            const command = new GetObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: pdfS3Key,
+                ResponseContentDisposition: `attachment; filename="${downloadFilename}"`,
+                ResponseContentType: 'application/pdf'
+            });
+            
+            // Create signed URL with 10 minute expiration
+            const expiresIn = 600;
+            const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
+            console.log(`Generated download URL for ${pdfS3Key}`);
+
+            // Return the signed URL
+            return res.json({ 
+                downloadUrl: signedUrl,
+                filename: downloadFilename,
+                expiresIn: expiresIn
+            });
+            
+        } catch (s3Error) {
+            console.error(`S3 error with ${pdfS3Key}:`, s3Error);
+            
+            // Update DB to mark this report as unavailable
             try {
                 await client.query(
                     'UPDATE analysis_results SET processing_status = $1 WHERE id = $2', 
@@ -158,34 +208,47 @@ router.get('/report/:analysisId/download', authMiddleware, async (req, res) => {
             }
             
             return res.status(404).json({ 
-                message: 'Report file has been deleted from storage.',
-                errorType: 'FILE_DELETED'
+                message: 'Report file could not be accessed in storage.',
+                errorType: 'FILE_ACCESS_ERROR'
             });
         }
-
-        // Use a distinct name for download if desired
-        const downloadFilename = `KaroStartup_Thesis_Report_${analysisId}.pdf`;
-
-        const command = new GetObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: pdfS3Key,
-            ResponseContentDisposition: `attachment; filename="${downloadFilename}"` // Force download prompt
-        });
-        const expiresIn = 300; // 5 minutes
-        const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
-        console.log(`Generated download URL for ${pdfS3Key}`);
-
-        // Return the signed URL instead of redirecting
-        res.json({ 
-            downloadUrl: signedUrl,
-            filename: downloadFilename,
-            expiresIn: expiresIn
-        });
-
     } catch (error) {
         console.error(`Error processing download for Analysis ID ${analysisId}:`, error);
-        res.status(500).json({ message: 'Server error processing download.' });
-    } finally { if (client) client.release(); }
+        res.status(500).json({ 
+            message: 'Server error processing download.', 
+            error: error.message 
+        });
+    } finally { 
+        if (client) client.release(); 
+    }
+});
+
+// GET /api/analysis/status/:analysisId - Get processing status for polling
+router.get('/status/:analysisId', authMiddleware, async (req, res) => {
+    const userId = req.user.userId;
+    const analysisId = parseInt(req.params.analysisId, 10);
+    if (isNaN(analysisId)) return res.status(400).json({ status: 'INVALID_ID', message: 'Invalid Analysis ID.' });
+
+    let client;
+    try {
+        client = await pool.connect();
+        const result = await client.query(
+            'SELECT processing_status, created_at FROM analysis_results WHERE id = $1 AND user_id = $2',
+            [analysisId, userId]
+        );
+        if (result.rows.length === 0) {
+            // Grace period: if record was just created, return PENDING for 10 seconds
+            // (In practice, the frontend should only poll with a valid ID returned from upload)
+            return res.status(200).json({ status: 'PENDING' });
+        }
+        const status = result.rows[0].processing_status;
+        return res.status(200).json({ status });
+    } catch (error) {
+        console.error(`Error fetching status for Analysis ID ${analysisId}:`, error);
+        return res.status(500).json({ status: 'ERROR', message: 'Server error fetching status.' });
+    } finally {
+        if (client) client.release();
+    }
 });
 
 module.exports = router;

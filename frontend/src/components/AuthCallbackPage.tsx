@@ -53,7 +53,30 @@ const AuthCallbackPage: React.FC = () => {
   }, [searchParams, login, navigate]); // Dependencies for useEffect
 
   // Render a loading state while processing
-  return <div>Processing login... Please wait.</div>;
+  return (
+    <div style={{
+      minHeight: '60vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--text-primary)',
+      background: 'var(--bg-subtle)',
+      fontSize: '1.2rem',
+      fontWeight: 500
+    }}>
+      <div className="loading-spinner" style={{
+        width: '2.5rem',
+        height: '2.5rem',
+        border: '4px solid rgba(59,130,246,0.15)',
+        borderTopColor: 'var(--primary-color)',
+        borderRadius: '50%',
+        marginBottom: '1.5rem',
+        animation: 'spin 1s linear infinite'
+      }}></div>
+      Processing login... Please wait.
+    </div>
+  );
 };
 
 // Need to import axios at the top

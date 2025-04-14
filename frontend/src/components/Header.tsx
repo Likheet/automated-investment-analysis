@@ -1,47 +1,96 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ThemeToggle from './ThemeToggle';
+import { useTheme } from '../context/ThemeContext';
 
 const Header: React.FC = () => {
     const { isAuthenticated, logout } = useAuth();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+    const [scrolled, setScrolled] = useState(false);
+    const {} = useTheme();
+    const location = useLocation();
+    const navigate = useNavigate();
+    
+    // Close mobile menu when changing routes
+    useEffect(() => {
+        setIsMobileMenuOpen(false);
+    }, [location.pathname]);
+    
+    // Handle scroll effect for sticky header
+    useEffect(() => {
+        const handleScroll = () => {
+            if (window.scrollY > 10) {
+                setScrolled(true);
+            } else {
+                setScrolled(false);
+            }
+        };
+        
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, []);
+
+    // Handle dashboard click - navigate with hash for scrolling
+    const handleDashboardClick = (e: React.MouseEvent) => {
+        e.preventDefault();
+        if (location.pathname === '/dashboard') {
+            // If already on dashboard, just scroll to history section
+            const historySection = document.querySelector('.dashboard-header');
+            if (historySection) {
+                historySection.scrollIntoView({ behavior: 'smooth' });
+            }
+        } else {
+            // Navigate to dashboard with hash
+            navigate('/dashboard#history');
+        }
+    }
 
     return (
-        <header className="header" style={{ 
-            backgroundColor: 'var(--bg-light)',
-            borderBottom: '1px solid var(--border-light)',
-            boxShadow: 'var(--shadow-sm)'
+        <header className={`header${scrolled ? ' scrolled' : ''}`} style={{
+            backgroundColor: 'var(--header-bg)',
+            borderBottom: '1px solid var(--header-border)',
+            boxShadow: scrolled ? 'var(--shadow-md)' : 'var(--shadow-sm)',
+            transition: 'all 0.3s ease',
+            position: 'sticky',
+            top: 0,
+            zIndex: 1000
         }}>
-            <div className="container flex items-center justify-between" style={{ height: '100%' }}>
+            <div className="container flex items-center justify-between" style={{
+                height: '100%',
+                maxWidth: 'var(--container-width)',
+                margin: '0 auto',
+                padding: '0 var(--spacing-md)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%'
+            }}>
                 <div className="logo-container">
-                    <Link to="/" className="logo-link" style={{
-                        fontSize: '1.5rem',
-                        fontWeight: '600',
-                        color: 'var(--primary-color)',
-                        textDecoration: 'none',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 'var(--spacing-xs)'
-                    }}>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M0 12.5A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5V6.85L8.129 8.947a.5.5 0 0 1-.258 0L0 6.85v5.65z"/>
-                            <path d="M0 4.5A1.5 1.5 0 0 1 1.5 3h13A1.5 1.5 0 0 1 16 4.5v1.384l-7.614 2.03a1.5 1.5 0 0 1-.772 0L0 5.884V4.5zm5-2A1.5 1.5 0 0 1 6.5 1h3A1.5 1.5 0 0 1 11 2.5V3h-1v-.5a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 0-.5.5V3H5v-.5z"/>
-                        </svg>
-                        KaroStartup
+                    <Link to="/" className="logo-link">
+                        <div className="logo-icon">
+                            {/* Investment Chart Icon */}
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M3 3v17a1 1 0 0 0 1 1h17v-2H5V3H3z"/>
+                                <path d="M15.293 14.707a.999.999 0 0 0 1.414 0l5-5-1.414-1.414L16 12.586l-2.293-2.293a.999.999 0 0 0-1.414 0l-5 5 1.414 1.414L13 12.414l2.293 2.293z"/>
+                                <circle cx="7.5" cy="7.5" r="1.5" />
+                                <circle cx="12" cy="10" r="1.5" />
+                                <circle cx="16.5" cy="7.5" r="1.5" />
+                            </svg>
+                            <div className="logo-circles">
+                                <div className="logo-circle1"></div>
+                                <div className="logo-circle2"></div>
+                            </div>
+                        </div>
+                        <span className="logo-text-gradient">
+                            <span style={{ fontWeight: 800, color: 'var(--primary-color)' }}>Invest</span>Analyzer
+                        </span>
                     </Link>
                 </div>
-
                 <button 
                     className="mobile-menu-button md:hidden"
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                    style={{
-                        padding: 'var(--spacing-xs)',
-                        backgroundColor: 'transparent',
-                        border: 'none',
-                        color: 'var(--text-primary)',
-                        cursor: 'pointer'
-                    }}
+                    aria-label="Toggle menu"
                 >
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
                         {isMobileMenuOpen ? (
@@ -51,33 +100,27 @@ const Header: React.FC = () => {
                         )}
                     </svg>
                 </button>
-
-                <nav className={`nav-links ${isMobileMenuOpen ? 'mobile-menu-open' : ''}`} style={{
-                    display: isMobileMenuOpen ? 'flex' : 'none'
-                }}>
+                <nav 
+                    className={`nav-links${isMobileMenuOpen ? ' mobile-menu-open' : ''}`}
+                    style={{ display: isMobileMenuOpen ? 'flex' : '' }}
+                >
                     <ThemeToggle />
                     {isAuthenticated ? (
                         <>
                             <Link 
                                 to="/dashboard" 
                                 className="nav-link"
-                                style={{
-                                    padding: 'var(--spacing-sm) var(--spacing-md)',
-                                    color: 'var(--text-secondary)',
-                                    textDecoration: 'none',
-                                    borderRadius: 'var(--radius-md)',
-                                    transition: 'all var(--transition-base)'
-                                }}
+                                onClick={handleDashboardClick}
                             >
                                 Dashboard
+                                {location.pathname === '/dashboard' && (
+                                    <span className="nav-link-underline"></span>
+                                )}
                             </Link>
                             <button 
                                 onClick={logout}
                                 className="btn btn-primary"
-                                style={{
-                                    padding: 'var(--spacing-sm) var(--spacing-lg)',
-                                    fontWeight: '500'
-                                }}
+                                style={{ marginLeft: 8 }}
                             >
                                 Logout
                             </button>
@@ -86,55 +129,16 @@ const Header: React.FC = () => {
                         <Link 
                             to="/login"
                             className="btn btn-primary"
-                            style={{
-                                padding: 'var(--spacing-sm) var(--spacing-lg)',
-                                fontWeight: '500'
-                            }}
+                            style={{ marginLeft: 8 }}
                         >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/>
+                            </svg>
                             Login
                         </Link>
                     )}
                 </nav>
             </div>
-
-            <style>{`
-                @media (max-width: 767px) {
-                    .nav-links {
-                        position: absolute;
-                        top: var(--header-height);
-                        left: 0;
-                        right: 0;
-                        background-color: var(--bg-light);
-                        padding: var(--spacing-md);
-                        flex-direction: column;
-                        gap: var(--spacing-md);
-                        border-bottom: 1px solid var(--border-light);
-                        box-shadow: var(--shadow-md);
-                    }
-
-                    .nav-links.mobile-menu-open {
-                        display: flex;
-                    }
-                }
-
-                @media (min-width: 768px) {
-                    .mobile-menu-button {
-                        display: none;
-                    }
-
-                    .nav-links {
-                        display: flex !important;
-                        position: static;
-                        padding: 0;
-                        flex-direction: row;
-                        gap: var(--spacing-md);
-                        align-items: center;
-                        background: none;
-                        border: none;
-                        box-shadow: none;
-                    }
-                }
-            `}</style>
         </header>
     );
 };

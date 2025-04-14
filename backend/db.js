@@ -1,22 +1,41 @@
 // backend/db.js
 const { Pool } = require('pg');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 
+// Log environment variables for debugging (REMOVE IN PRODUCTION)
+console.log('Environment Variables Check:');
+console.log('DB_HOST:', process.env.DB_HOST);
+console.log('DB_USER:', process.env.DB_USER);
+console.log('DB_NAME:', process.env.DB_NAME);
+
+// Ensure password is explicitly a string
 const dbConfig = {
     host: process.env.DB_HOST,
     port: parseInt(process.env.DB_PORT || "5432", 10),
     user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+    password: String(process.env.DB_PASSWORD), // Force as string
     database: process.env.DB_NAME,
     ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
 };
 
+console.log('DB Config (without password):', { 
+    ...dbConfig, 
+    password: '[REDACTED]' 
+});
+
 const pool = new Pool(dbConfig);
 
 pool.connect()
-    .then(client => { console.log('DB Pool connected successfully.'); client.release(); })
-    .catch(err => console.error('CRITICAL: Failed to connect DB Pool:', err.stack));
-
+    .then(client => { 
+        console.log('DB Pool connected successfully.'); 
+        client.release(); 
+    })
+    .catch(err => {
+        console.error('CRITICAL: Failed to connect DB Pool:', err.message);
+        console.error('Connection details issue - check your .env file values and database availability');
+    });
+   
 const runSchemaUpdate = async () => {
     const schemaUpdateQuery = `
         ALTER TABLE users

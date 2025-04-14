@@ -34,32 +34,16 @@ const LoginPage: React.FC = () => {
     };
 
     return (
-        <div className="flex items-center justify-center min-h-screen bg-subtle px-4">
-            <div className="card" style={{
-                maxWidth: '400px',
-                width: '100%',
-                animation: 'fadeIn 0.5s ease-out'
-            }}>
+        <div className="auth-container">
+            <div className="auth-card">
                 <div className="card-header text-center border-bottom-0 bg-transparent pt-4">
                     <h1 className="text-2xl font-semibold mb-1">Welcome Back</h1>
                     <p className="text-muted">Sign in to your account</p>
                 </div>
-
                 <div className="card-body">
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="form-group">
-                            <label 
-                                htmlFor="email" 
-                                className="form-label"
-                                style={{
-                                    display: 'block',
-                                    marginBottom: 'var(--spacing-xs)',
-                                    color: 'var(--text-secondary)',
-                                    fontSize: '0.875rem'
-                                }}
-                            >
-                                Email Address
-                            </label>
+                            <label htmlFor="email" className="form-label">Email Address</label>
                             <input
                                 type="email"
                                 id="email"
@@ -68,29 +52,13 @@ const LoginPage: React.FC = () => {
                                 className="form-control focus-ring"
                                 placeholder="Enter your email"
                                 required
+                                autoComplete="email"
                             />
                         </div>
-
                         <div className="form-group">
                             <div className="flex justify-between items-center mb-1">
-                                <label 
-                                    htmlFor="password" 
-                                    className="form-label"
-                                    style={{
-                                        color: 'var(--text-secondary)',
-                                        fontSize: '0.875rem'
-                                    }}
-                                >
-                                    Password
-                                </label>
-                                <Link 
-                                    to="/forgot-password"
-                                    className="text-sm hover-underline"
-                                    style={{
-                                        color: 'var(--primary-color)',
-                                        textDecoration: 'none'
-                                    }}
-                                >
+                                <label htmlFor="password" className="form-label">Password</label>
+                                <Link to="/forgot-password" className="text-sm hover-underline" style={{ color: 'var(--primary-color)' }}>
                                     Forgot Password?
                                 </Link>
                             </div>
@@ -102,93 +70,44 @@ const LoginPage: React.FC = () => {
                                 className="form-control focus-ring"
                                 placeholder="Enter your password"
                                 required
+                                autoComplete="current-password"
                             />
                         </div>
-
                         {error && (
-                            <div 
-                                className="error-message"
-                                style={{
-                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                    color: 'var(--error)',
-                                    padding: 'var(--spacing-md)',
-                                    borderRadius: 'var(--radius-md)',
-                                    fontSize: '0.875rem',
-                                    animation: 'shake 0.5s ease-in-out'
-                                }}
-                            >
+                            <div className="error-message" style={{marginBottom: 'var(--spacing-lg)'}}>
                                 {error}
                             </div>
                         )}
-
                         <button
                             type="submit"
                             className="btn btn-primary w-full"
                             disabled={isLoading}
-                            style={{
-                                padding: 'var(--spacing-md)',
-                                fontSize: '1rem',
-                                position: 'relative',
-                                overflow: 'hidden'
-                            }}
+                            style={{ padding: 'var(--spacing-md)', fontSize: '1rem', position: 'relative', overflow: 'hidden' }}
                         >
                             {isLoading ? (
                                 <>
-                                    <div className="loading-spinner" style={{
-                                        width: '1rem',
-                                        height: '1rem',
-                                        marginRight: 'var(--spacing-xs)',
-                                        border: '2px solid rgba(255, 255, 255, 0.3)',
-                                        borderTopColor: 'white',
-                                        display: 'inline-block'
-                                    }}></div>
+                                    <div className="loading-spinner" style={{ width: '1rem', height: '1rem', marginRight: 'var(--spacing-xs)', border: '2px solid rgba(255, 255, 255, 0.3)', borderTopColor: 'white', display: 'inline-block' }}></div>
                                     Signing in...
                                 </>
                             ) : 'Sign in'}
                         </button>
-
                         <p className="text-center text-muted mt-4">
                             Don't have an account?{' '}
-                            <Link 
-                                to="/register"
-                                className="link-primary hover-underline"
-                                style={{
-                                    color: 'var(--primary-color)',
-                                    textDecoration: 'none'
-                                }}
-                            >
+                            <Link to="/register" className="link-primary hover-underline" style={{ color: 'var(--primary-color)' }}>
                                 Create one now
                             </Link>
                         </p>
                     </form>
                 </div>
             </div>
-
-            <style>{`
-                .focus-ring:focus {
-                    border-color: var(--primary-color);
-                    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
-                }
-                
-                .hover-underline:hover {
-                    text-decoration: underline;
-                }
-                
-                @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(-10px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-
-                @keyframes shake {
-                    0%, 100% { transform: translateX(0); }
-                    25% { transform: translateX(-5px); }
-                    75% { transform: translateX(5px); }
-                }
-
-                .loading-spinner {
-                    animation: spin 1s linear infinite;
-                }
-            `}</style>
+            <div className="auth-banner">
+                <h2>Analyze Investment Reports with AI</h2>
+                <p>Upload financial reports and get instant analysis to make smarter investment decisions.</p>
+                <div className="auth-banner-decoration">
+                    <div className="decoration-circle"></div>
+                    <div className="decoration-square"></div>
+                </div>
+            </div>
         </div>
     );
 };
