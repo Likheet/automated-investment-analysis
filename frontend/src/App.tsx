@@ -411,7 +411,6 @@ function AppContent(): React.ReactElement {
                     <ThemeToggle />
                     {isAuthenticated ? (
                         <>
-                            <Link to="/dashboard" className="btn nav-btn">Dashboard</Link>
                             <button onClick={logout} className="btn btn-primary nav-btn">Logout</button>
                         </>
                     ) : (
@@ -501,26 +500,12 @@ function AppContent(): React.ReactElement {
             </main>
 
             <footer className="footer" style={{padding: 'var(--spacing-md)', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)'}}>
-                <div className="footer-container">
+                <div className="footer-container" style={{justifyContent: 'center', alignItems: 'center', textAlign: 'center'}}>
                     <div className="footer-info">
                         <div className="footer-logo">
                             <span className="app-logo">InvestAnalyzer</span>
                         </div>
-                        <p>© {new Date().getFullYear()} InvestAnalyzer | All rights reserved</p>
-                    </div>
-                    <div className="footer-sections">
-                        <div className="footer-section">
-                            <h4>Company</h4>
-                            <a href="#" className="footer-link">About Us</a>
-                            <a href="#" className="footer-link">Careers</a>
-                            <a href="#" className="footer-link">Contact</a>
-                        </div>
-                        <div className="footer-section">
-                            <h4>Support</h4>
-                            <a href="#" className="footer-link">Help Center</a>
-                            <a href="#" className="footer-link">Privacy Policy</a>
-                            <a href="#" className="footer-link">Terms of Service</a>
-                        </div>
+                        <p style={{margin: 0}}>© 2025 InvestAnalyzer | All rights reserved</p>
                     </div>
                 </div>
                 <div className="footer-decoration">

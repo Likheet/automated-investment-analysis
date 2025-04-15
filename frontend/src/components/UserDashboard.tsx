@@ -335,12 +335,12 @@ const UserDashboard: React.FC = () => {
     const [showToast, setShowToast] = useState<boolean>(false);
     const [toastType, setToastType] = useState<'success' | 'error'>('success');
     const [downloadingId, setDownloadingId] = useState<number | null>(null);
-    const [deletingId, setDeletingId] = useState<number | null>(null);
     const [confirmDeleteModalOpen, setConfirmDeleteModalOpen] = useState<boolean>(false);
     const [recordToDelete, setRecordToDelete] = useState<number | null>(null);
     const [isRefreshHovered, setIsRefreshHovered] = useState(false);
     const [isRefreshActive, setIsRefreshActive] = useState(false);
     const [newlyCreatedId, setNewlyCreatedId] = useState<number | null>(null);
+    const [selectedIds, setSelectedIds] = useState<number[]>([]);
     const { token } = useAuth();
     const { theme } = useTheme();
     
@@ -390,11 +390,6 @@ const UserDashboard: React.FC = () => {
     }, [fetchHistory]);
     
     // Delete confirmation handlers
-    const handleDeleteClick = (id: number) => {
-        setRecordToDelete(id);
-        setConfirmDeleteModalOpen(true);
-    };
-    
     const handleCancelDelete = () => {
         setConfirmDeleteModalOpen(false);
         setRecordToDelete(null);
@@ -405,7 +400,6 @@ const UserDashboard: React.FC = () => {
         if (!token || !recordToDelete) return;
         
         setConfirmDeleteModalOpen(false);
-        setDeletingId(recordToDelete);
         
         try {
             await axios.delete(`http://localhost:5001/api/analysis/record/${recordToDelete}`, {
@@ -445,7 +439,6 @@ const UserDashboard: React.FC = () => {
             setToastMessage(errorMessage);
             setShowToast(true);
         } finally {
-            setDeletingId(null);
             setRecordToDelete(null);
         }
     };
@@ -460,6 +453,16 @@ const UserDashboard: React.FC = () => {
     const hideToast = () => {
         setShowToast(false);
     };
+
+    // Auto-hide toast after 2.5 seconds when shown
+    useEffect(() => {
+        if (showToast) {
+            const timer = setTimeout(() => {
+                setShowToast(false);
+            }, 2500);
+            return () => clearTimeout(timer);
+        }
+    }, [showToast]);
 
     // Download report handler
     const handleDownload = async (analysisId: number) => {
@@ -517,6 +520,43 @@ const UserDashboard: React.FC = () => {
         }
     };
     
+    // Handle checkbox selection
+    const handleSelectRow = (id: number) => {
+        setSelectedIds((prev) =>
+            prev.includes(id) ? prev.filter((sid) => sid !== id) : [...prev, id]
+        );
+    };
+
+    const handleSelectAll = () => {
+        if (selectedIds.length === history.length) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(history.map((r) => r.id));
+        }
+    };
+
+    // Bulk delete handler
+    const handleBulkDelete = async () => {
+        if (!token || selectedIds.length === 0) return;
+        setIsLoading(true);
+        try {
+            await Promise.all(selectedIds.map((id) =>
+                axios.delete(`http://localhost:5001/api/analysis/record/${id}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                })
+            ));
+            setHistory((prev) => prev.filter((r) => !selectedIds.includes(r.id)));
+            setSelectedIds([]);
+            showSuccessToast('Selected records deleted successfully!');
+        } catch (err) {
+            setToastType('error');
+            setToastMessage('Failed to delete selected records.');
+            setShowToast(true);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     // Get status display component
     const getStatusDisplay = (status: string | null): React.ReactElement => {
         if (!status) return <span>-</span>;
@@ -743,10 +783,33 @@ const UserDashboard: React.FC = () => {
             
             {!isLoading && history.length > 0 && (
                 <div className="card table-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px' }}>
+                        {selectedIds.length > 0 && (
+                            <button
+                                className="btn btn-error"
+                                disabled={isLoading}
+                                onClick={handleBulkDelete}
+                            >
+                                Delete Selected
+                            </button>
+                        )}
+                        <span style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+                            {selectedIds.length} selected
+                        </span>
+                    </div>
                     <div className="table-responsive">
                         <table id="analysis-history-table" className="analysis-table">
                             <thead>
                                 <tr>
+                                    <th>
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.length === history.length && history.length > 0}
+                                            onChange={handleSelectAll}
+                                            aria-label="Select all"
+                                            className="row-checkbox"
+                                        />
+                                    </th>
                                     <th>Date</th>
                                     <th>File Name</th>
                                     <th>Status</th>
@@ -759,6 +822,15 @@ const UserDashboard: React.FC = () => {
                             <tbody>
                                 {history.map((record) => (
                                     <tr key={record.id} className={record.id === newlyCreatedId ? 'newly-created' : ''}>
+                                        <td>
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedIds.includes(record.id)}
+                                                onChange={() => handleSelectRow(record.id)}
+                                                aria-label={`Select row for ${record.original_filename}`}
+                                                className="row-checkbox"
+                                            />
+                                        </td>
                                         <td className="date-cell">
                                             {formatTimestamp(record.created_at)}
                                         </td>
@@ -831,23 +903,6 @@ const UserDashboard: React.FC = () => {
                                                     )}
                                                 </span>
                                             )}
-                                            <button 
-                                                onClick={() => handleDeleteClick(record.id)} 
-                                                disabled={deletingId === record.id} 
-                                                className="btn btn-sm btn-error"
-                                            >
-                                                {deletingId === record.id ? (
-                                                    <span className="loading-spinner" style={{width: '14px', height: '14px'}}></span>
-                                                ) : (
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                        <polyline points="3 6 5 6 21 6"></polyline>
-                                                        <path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path>
-                                                        <path d="M10 11v6"></path>
-                                                        <path d="M14 11v6"></path>
-                                                    </svg>
-                                                )}
-                                                Delete
-                                            </button>
                                         </td>
                                     </tr>
                                 ))}
@@ -1290,6 +1345,29 @@ const UserDashboard: React.FC = () => {
 
                 tr.newly-created {
                     animation: highlight-new-row 1.5s ease-in-out infinite;
+                }
+
+                .row-checkbox {
+                    accent-color: var(--primary-color, #06b6d4);
+                    background: transparent;
+                    border-radius: 4px;
+                    border: 1px solid var(--border-color, #cbd5e1);
+                    width: 16px;
+                    height: 16px;
+                    cursor: pointer;
+                    opacity: 0.45;
+                    box-shadow: none;
+                    transition: opacity 0.2s, border-color 0.2s;
+                }
+                .row-checkbox:checked {
+                    opacity: 0.7;
+                    border-color: var(--primary-color, #06b6d4);
+                    background: rgba(6,182,212,0.08);
+                }
+                .row-checkbox:focus {
+                    outline: none;
+                    border-color: var(--primary-color, #06b6d4);
+                    opacity: 0.8;
                 }
             `}</style>
         </div>

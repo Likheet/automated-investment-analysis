@@ -572,7 +572,7 @@ a.link-animated:hover::after {
   text-align: center;
   box-shadow: var(--shadow-sm);
   transition: all 0.4s var(--transition-bounce);
-  border: 1px solid transparent;
+  border: 1px solid gray;
   position: relative;
   overflow: hidden;
 }

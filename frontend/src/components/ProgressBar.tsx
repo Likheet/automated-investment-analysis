@@ -41,9 +41,6 @@ const PROCESS_STAGES = [
     }>;
 }[];
 
-// Define a proper type for our stages
-type ProcessStage = typeof PROCESS_STAGES[number];
-
 // Calculate cumulative progress points where each stage starts
 const STAGE_PROGRESS_POINTS: Record<string, number> = {};
 let cumulativeProgress = 0;
@@ -58,14 +55,13 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ status, onComplete, onRefresh
     const [targetProgress, setTargetProgress] = useState(0);
     const [stageLabel, setStageLabel] = useState('Initializing...');
     const [currentStage, setCurrentStage] = useState<string | null>(null);
-    const [detailStep, setDetailStep] = useState(0);
     const stageTimerRef = useRef<NodeJS.Timeout | null>(null);
     const completionDelayRef = useRef<NodeJS.Timeout | null>(null);
     const [isHovered, setIsHovered] = useState(false);
     const [isActive, setIsActive] = useState(false);
 
     // Find label for the current status
-    const getStageLabel = useCallback((status: string | null, detailStepIndex = 0): string => {
+    const getStageLabel = useCallback((status: string | null): string => {
         if (!status) return 'Initializing...';
 
         const upperStatus = status.toUpperCase();
@@ -75,8 +71,7 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ status, onComplete, onRefresh
 
         // Check if there are substeps for this stage and return the appropriate substep label
         if (stage && 'substeps' in stage && stage.substeps && Array.isArray(stage.substeps)) {
-            const subIndex = Math.min(detailStepIndex, stage.substeps.length - 1);
-            return stage.substeps[subIndex].label;
+            return stage.substeps[0].label;
         }
 
         return stage?.label || 'Processing...';
@@ -103,9 +98,8 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ status, onComplete, onRefresh
         const advanceSubstep = () => {
             if (!('substeps' in stage) || !stage.substeps || step >= stage.substeps.length) return;
 
-            // Update detail step and label
-            setDetailStep(step);
-            setStageLabel(getStageLabel(status, step));
+            // Update label
+            setStageLabel(getStageLabel(status));
 
             // Update progress based on substep
             const substep = stage.substeps[step];
@@ -149,8 +143,6 @@ const ProgressBar: React.FC<ProgressBarProps> = ({ status, onComplete, onRefresh
                 clearTimeout(completionDelayRef.current);
                 completionDelayRef.current = null;
             }
-
-            setDetailStep(0);
         }
 
         if (upperStatus === currentStage) {

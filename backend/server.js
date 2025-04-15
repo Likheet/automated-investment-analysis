@@ -161,55 +161,192 @@ function runTextExtraction(s3Key) {
 }
 
 async function analyzeWithGemini(extractedSlides) {
+    // Validate input
+    if (!extractedSlides || !Array.isArray(extractedSlides) || extractedSlides.length < 5) {
+        throw new Error("Invalid slides: Minimum 5 slides required");
+    }
+    
+    if (extractedSlides.length > 20) {
+        console.warn("Warning: More than 20 slides provided, which exceeds recommendations");
+    }
+    
+    // Format slides for analysis
     let fullDeckText = extractedSlides.map(slide =>
         `Slide ${slide.slide}:\nText: ${slide.text || 'No text'}\nNotes: ${slide.notes || 'No notes'}\n---`
     ).join('\n\n');
-    // Add truncation logic if needed based on model context window size
-
+    
+    // Add timestamp in required format
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/T/, ' ').replace(/\..+/, ' UTC');
+    
+    // Enhanced prompt with all required fields and EXACT category names emphasized
     const analysisPrompt = `
-        Analyze the following startup pitch deck text. Evaluate it *only* on the provided text against the nine categories below.
-        For each category, provide:
-        1. 'score' (integer 0-10, 0=missing, 10=excellent).
-        2. 'qualitative_feedback' (string 50-150 words summarizing category strengths/weaknesses based *only* on text).
+You are an expert venture capital analyst evaluating a startup pitch deck. 
+The pitch deck will be evaluated against the following nine categories with fixed weights and precise criteria:
 
-        Categories & Criteria:
-        1. Problem Statement (10%): Clarity of problem, evidence of pain, scope. (0=no statement, 10=well-defined+data).
-        2. Solution/Product (15%): Feasibility, innovation, alignment, clarity. (0=no solution, 10=unique, practical, clear).
-        3. Market Opportunity (20%): TAM/SAM/SOM, realism, demand evidence. (0=no data, 10=specific, credible, data-backed).
-        4. Business Model (15%): Revenue streams, scalability, acquisition plan, pricing. (0=no model, 10=detailed, sustainable, logical).
-        5. Competitive Landscape (10%): Competitors identified, UVP, defensibility. (0=no mention, 10=detailed+strong diff).
-        6. Team (15%): Relevant experience, roles, execution ability evidence. (0=no info, 10=experienced, balanced, proven record).
-        7. Traction/Milestones (10%): Metrics (revenue, users), achieved milestones, funding alignment. (0=no traction, 10=quantifiable, impressive).
-        8. Financial Projections (10%): 3-5yr forecast, assumption transparency, growth realism. (0=no financials, 10=detailed, reasonable, supported).
-        9. Clarity and Presentation (Text only) (5%): Logical flow, clarity of text (ignore visual design). (0=incoherent, 10=clear, professional).
+1. Problem Statement (Weight: 10%)
+   - Criteria: Clarity of problem, evidence of customer pain (e.g., stats, quotes), scope of impact.
+   - Scoring: 0 (no problem stated) to 10 (well-defined with data validation).
 
-        Additionally, provide:
-        * 'overall_strengths': Bullet list (3-5 points) of significant positive findings.
-        * 'overall_weaknesses': Bullet list (3-5 points) of significant risks/gaps.
-        * 'recommendation': ONE of: "Strong Buy", "Hold", or "Pass".
-        * 'confidence_score': Integer (0-100) AI certainty based *only* on text completeness/coherence.
+2. Solution/Product (Weight: 15%)
+   - Criteria: Feasibility, innovation, alignment with problem, clarity of explanation.
+   - Scoring: 0 (no solution) to 10 (unique, practical, well-articulated).
 
-        Return the entire analysis strictly as a single JSON object.
+3. Market Opportunity (Weight: 20%)
+   - Criteria: TAM/SAM/SOM defined, realism of estimates, evidence of demand (e.g., trends, surveys).
+   - Scoring: 0 (no market data) to 10 (specific, credible, data-backed).
 
-        Pitch Deck Text:
-        \`\`\`
-        ${fullDeckText}
-        \`\`\`
+4. Business Model (Weight: 15%)
+   - Criteria: Revenue streams, scalability, customer acquisition plan, pricing clarity.
+   - Scoring: 0 (no model) to 10 (detailed, sustainable, logical).
+
+5. Competitive Landscape (Weight: 10%)
+   - Criteria: Identification of competitors, strength of UVP, defensibility of position.
+   - Scoring: 0 (no mention) to 10 (detailed analysis with strong differentiation).
+
+6. Team (Weight: 15%)
+   - Criteria: Relevant experience, completeness of roles, evidence of execution ability.
+   - Scoring: 0 (no team info) to 10 (experienced, balanced, proven track record).
+
+7. Traction/Milestones (Weight: 10%)
+   - Criteria: Metrics (e.g., revenue, users), achieved milestones, alignment with funding ask.
+   - Scoring: 0 (no traction) to 10 (quantifiable, impressive progress).
+
+8. Financial Projections (Weight: 10%)
+   - Criteria: 3-5 year forecasts, transparency of assumptions, realism of growth rates.
+   - Scoring: 0 (no financials) to 10 (detailed, reasonable, supported).
+
+9. Clarity and Presentation (Weight: 5%)
+   - Criteria: Logical flow, visual design, grammar, conciseness (max 20 slides).
+   - Scoring: 0 (incoherent, sloppy) to 10 (polished, professional, concise).
+
+For each category, provide:
+1. 'score' (integer 0-10, 0=missing, 10=excellent).
+2. 'qualitative_feedback' (string 50-150 words summarizing category strengths/weaknesses based only on text).
+
+Additionally, provide:
+* 'overall_strengths': Bullet list (3-5 points) of significant positive findings.
+* 'overall_weaknesses': Bullet list (3-5 points) of significant risks/gaps.
+* 'recommendation': ONE of: "Strong Buy", "Hold", or "Pass".
+* 'confidence_score': Integer (0-100) AI certainty based only on text completeness/coherence.
+* 'recommendations': 100-200 words of actionable advice for due diligence or further investigation.
+* 'processing_date': "${timestamp}"
+
+Return the entire analysis strictly as a single JSON object with these EXACT category names as keys (do not modify or add suffixes like "Text only"):
+"Problem Statement", "Solution/Product", "Market Opportunity", "Business Model", "Competitive Landscape", "Team", "Traction/Milestones", "Financial Projections", "Clarity and Presentation".
+
+Pitch Deck Text:
+\`\`\`
+${fullDeckText}
+\`\`\`
     `;
+    
     console.log("Sending request to Gemini API...");
     try {
-        const result = await geminiModel.generateContent(analysisPrompt);
-        const responseText = result.response.text();
+        // Call API with retry logic
+        const responseText = await callGeminiWithRetry(analysisPrompt);
+        
         try {
-            const analysisResult = JSON.parse(responseText);
-            // Basic validation of structure
-                if (!analysisResult || 
-                    analysisResult['Problem Statement']?.score === undefined || 
-                    analysisResult['Problem Statement']?.score === null || 
-                    !analysisResult.recommendation) {
-                    throw new Error("Analysis structure validation failed.");
+            let analysisResult = JSON.parse(responseText);
+            
+            // Handle potential numeric key structure
+            const numericCategoryKeys = Object.keys(analysisResult).filter(k => /^\d+$/.test(k) && analysisResult[k]?.category);
+            if (numericCategoryKeys.length > 0) {
+                const convertedResult = {};
+                // Copy non-numeric keys
+                for (const key of Object.keys(analysisResult)) {
+                    if (!/^\d+$/.test(key)) {
+                        convertedResult[key] = analysisResult[key];
+                    }
                 }
-            console.log("Gemini analysis parsed successfully.");
+                // Use the 'category' field as the key for each numeric entry
+                for (const numKey of numericCategoryKeys) {
+                    const catName = analysisResult[numKey].category;
+                    convertedResult[catName] = analysisResult[numKey];
+                }
+                analysisResult = convertedResult;
+            }
+            
+            // Define category aliases for validation
+            const categoryAliases = {
+                "Clarity and Presentation (Text only)": "Clarity and Presentation",
+                "Clarity and Presentation (Text Only)": "Clarity and Presentation"
+            };
+            
+            // Enhanced validation
+            const requiredCategories = [
+                "Problem Statement", "Solution/Product", "Market Opportunity", "Business Model", 
+                "Competitive Landscape", "Team", "Traction/Milestones", 
+                "Financial Projections", "Clarity and Presentation"
+            ];
+
+            const requiredFields = [
+                "recommendation", "overall_strengths", "overall_weaknesses", 
+                "confidence_score", "recommendations"
+            ];
+
+            // Validate all categories have proper scores, accounting for aliases
+            const missingCategories = requiredCategories.filter(cat => {
+                // Check both direct name and aliases
+                const hasDirectCategory = analysisResult[cat] && 
+                                        typeof analysisResult[cat].score === 'number';
+                
+                // Check aliases
+                const hasAlias = Object.entries(categoryAliases)
+                                    .some(([alias, canonicalName]) => 
+                                        canonicalName === cat && 
+                                        analysisResult[alias] && 
+                                        typeof analysisResult[alias].score === 'number');
+                
+                return !(hasDirectCategory || hasAlias);
+            });
+            
+            // Validate all required top-level fields exist
+            const missingFields = requiredFields.filter(field => 
+                analysisResult[field] === undefined
+            );
+
+            if (missingCategories.length > 0 || missingFields.length > 0) {
+                console.error("Missing categories:", missingCategories);
+                console.error("Missing fields:", missingFields);
+                throw new Error(`Analysis validation failed - missing required data`);
+            }
+            
+            // Normalize category names if aliases were used
+            for (const [alias, canonicalName] of Object.entries(categoryAliases)) {
+                if (analysisResult[alias] && !analysisResult[canonicalName]) {
+                    analysisResult[canonicalName] = analysisResult[alias];
+                    delete analysisResult[alias];
+                    console.log(`Normalized category name from "${alias}" to "${canonicalName}"`);
+                }
+            }
+            
+            // Track category scores for debugging
+            const categoryScoresUsed = {};
+            for (const cat of requiredCategories) {
+                if (analysisResult[cat] && typeof analysisResult[cat].score === 'number') {
+                    categoryScoresUsed[cat] = analysisResult[cat].score;
+                } else {
+                    categoryScoresUsed[cat] = 'missing';
+                }
+            }
+            
+            // Calculate overall score
+            const calculatedScore = calculateOverallScore(analysisResult);
+            analysisResult.overall_score = calculatedScore;
+            
+            console.log("Category scores used:", JSON.stringify(categoryScoresUsed));
+            console.log("Overall score calculated:", calculatedScore);
+            
+            // If there's a pre-computed score in the response, compare them
+            if (typeof analysisResult.original_overall_score === 'number') {
+                const difference = Math.abs(analysisResult.original_overall_score - calculatedScore);
+                if (difference > 1) { // Allow for minor rounding differences
+                    console.warn(`Score discrepancy detected: calculated ${calculatedScore}, response had ${analysisResult.original_overall_score}`);
+                }
+            }
+            
+            console.log("Gemini analysis parsed and validated successfully.");
             return analysisResult;
         } catch (e) {
              console.error("Failed to parse Gemini JSON:", responseText);
@@ -221,23 +358,153 @@ async function analyzeWithGemini(extractedSlides) {
     }
 }
 
-function calculateOverallScore(analysisResult) {
-     const weights = {
-        "Problem Statement": 0.10, "Solution/Product": 0.15, "Market Opportunity": 0.20, "Business Model": 0.15,
-        "Competitive Landscape": 0.10, "Team": 0.15, "Traction/Milestones": 0.10, "Financial Projections": 0.10,
-        "Clarity and Presentation (Text only)": 0.05
-     };
-    let totalScore = 0; let totalWeight = 0;
-    for (const category in weights) {
-        if (analysisResult?.[category]?.score != null) {
-            let score = Math.max(0, Math.min(10, analysisResult[category].score));
-            totalScore += score * weights[category];
-            totalWeight += weights[category];
+async function callGeminiWithRetry(prompt, maxRetries = 2) {
+    let retries = 0;
+    
+    while (retries <= maxRetries) {
+        try {
+            const result = await geminiModel.generateContent(prompt);
+            return result.response.text();
+        } catch (error) {
+            retries++;
+            console.error(`API call failed (attempt ${retries}/${maxRetries+1}):`, error);
+            
+            if (retries > maxRetries) {
+                throw new Error(`Failed to analyze after ${maxRetries+1} attempts: ${error.message}`);
+            }
+            
+            // Exponential backoff before retry
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries-1)));
         }
     }
-     if (totalWeight === 0) return 0;
-     const overall = Math.round((totalScore / totalWeight) * 100);
+}
+
+function calculateOverallScore(analysisResult) {
+    // Fixed weights as per requirements
+    const weights = {
+        "Problem Statement": 0.10,
+        "Solution/Product": 0.15,
+        "Market Opportunity": 0.20,
+        "Business Model": 0.15,
+        "Competitive Landscape": 0.10,
+        "Team": 0.15,
+        "Traction/Milestones": 0.10,
+        "Financial Projections": 0.10,
+        "Clarity and Presentation": 0.05
+    };
+    
+    // Category aliases that might be used
+    const categoryAliases = {
+        "Clarity and Presentation (Text only)": "Clarity and Presentation",
+        "Clarity and Presentation (Text Only)": "Clarity and Presentation"
+    };
+    
+    let totalScore = 0;
+    let totalWeightUsed = 0;
+    const categoryScoresUsed = {};
+    
+    // Process each category
+    for (const category in weights) {
+        let categoryData = analysisResult[category];
+        
+        // Check for aliases if the main category name isn't found
+        if (!categoryData) {
+            for (const [alias, canonicalName] of Object.entries(categoryAliases)) {
+                if (canonicalName === category && analysisResult[alias]) {
+                    categoryData = analysisResult[alias];
+                    break;
+                }
+            }
+        }
+        
+        // If we have a valid score for this category, add it to the total
+        if (categoryData && typeof categoryData.score === 'number') {
+            let score = Math.max(0, Math.min(10, categoryData.score));
+            totalScore += score * weights[category];
+            totalWeightUsed += weights[category];
+            categoryScoresUsed[category] = score;
+        } else {
+            // Missing category - count as zero
+            console.warn(`Category '${category}' score missing, counting as 0`);
+            categoryScoresUsed[category] = 0;
+            // Still count the weight
+            totalWeightUsed += weights[category];
+        }
+    }
+
+    // If no categories were processed at all, return 0
+    if (totalWeightUsed === 0) return 0;
+    
+    // Calculate weighted average and convert to 0-100 scale
+    const overall = Math.round((totalScore / totalWeightUsed) * 10);
+    
+    // Log detailed calculation for debugging
+    console.log("Category scores used in calculation:", JSON.stringify(categoryScoresUsed));
+    console.log(`Weighted sum: ${totalScore}, Total weight: ${totalWeightUsed}`);
+    console.log(`Calculation: (${totalScore} / ${totalWeightUsed}) * 10 = ${overall}`);
+    
     return Math.max(0, Math.min(100, overall));
+}
+
+function prepareReportData(analysisResult) {
+    // Try to extract startup name from slides or use default
+    let startupName = extractStartupName(analysisResult) || "Startup";
+    
+    // Format date for filename (DDMMYYYY)
+    const today = new Date();
+    const dateStr = `${today.getDate().toString().padStart(2, '0')}${(today.getMonth()+1).toString().padStart(2, '0')}${today.getFullYear()}`;
+    
+    return {
+        reportData: analysisResult,
+        filename: `Investment_Thesis_${startupName}_${dateStr}.pdf`
+    };
+}
+
+// Helper function to attempt extracting startup name
+function extractStartupName(analysisResult) {
+    // Look for startup name in various possible locations
+    
+    // Check if there's an explicit startup_name field
+    if (analysisResult.startup_name) {
+        return analysisResult.startup_name;
+    }
+    
+    // Try to extract from startup description in Problem Statement or Solution
+    for (const category of ["Problem Statement", "Solution/Product"]) {
+        if (analysisResult[category]?.qualitative_feedback) {
+            const feedback = analysisResult[category].qualitative_feedback;
+            
+            // Look for company name patterns like "XYZ is a..." or "At XYZ, we..."
+            const companyPatterns = [
+                /([A-Z][A-Za-z0-9]+(?:\s[A-Z][A-Za-z0-9]+)*)\s+is\s+a/,
+                /At\s+([A-Z][A-Za-z0-9]+(?:\s[A-Z][A-Za-z0-9]+)*)/
+            ];
+            
+            for (const pattern of companyPatterns) {
+                const match = feedback.match(pattern);
+                if (match && match[1]) {
+                    return match[1].trim();
+                }
+            }
+        }
+    }
+    
+    // Default fallback
+    return null;
+}
+
+function prepareReportData(analysisResult) {
+    // Try to extract startup name from slides (would need actual implementation)
+    let startupName = "Startup";
+    
+    // Format date for filename (DDMMYYYY)
+    const today = new Date();
+    const dateStr = `${today.getDate().toString().padStart(2, '0')}${(today.getMonth()+1).toString().padStart(2, '0')}${today.getFullYear()}`;
+    
+    return {
+        reportData: analysisResult,
+        filename: `Investment_Thesis_${startupName}_${dateStr}.pdf`
+    };
 }
 
 // Modify saveAnalysisToDB to include original_filename and initial status
@@ -435,11 +702,6 @@ async function generateInvestmentThesisPDF(analysisData, analysisId, originalFil
               addH1("Detailed Recommendations");
               addP(analysisData?.recommendations || analysisData?.recommendation || "No specific recommendations provided beyond the overall guidance.");
               doc.moveDown(1);
-
-              // Confidence Score
-              addH1("AI Analysis Confidence");
-              addSubHeading("Score:"); addP(`${analysisData?.confidence_score ?? 'N/A'} / 100`, { indent: 20 });
-              addP("Basis: Reflects AI certainty based on text completeness and coherence. Does not guarantee investment success.", { indent: 20 });
 
              // Footer (Page Numbers)
              const range = doc.bufferedPageRange();
