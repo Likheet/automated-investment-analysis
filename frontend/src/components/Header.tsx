@@ -1,16 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ThemeToggle from './ThemeToggle';
 import { useTheme } from '../context/ThemeContext';
+import './Header.css'; // Import the external CSS file
 
 const Header: React.FC = () => {
-    const { isAuthenticated, logout } = useAuth();
+    const { isAuthenticated, logout, user } = useAuth();
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
-    const {} = useTheme();
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const { theme } = useTheme();
     const location = useLocation();
     const navigate = useNavigate();
+    const dropdownRef = useRef<HTMLDivElement>(null);
     
     // Close mobile menu when changing routes
     useEffect(() => {
@@ -20,7 +23,7 @@ const Header: React.FC = () => {
     // Handle scroll effect for sticky header
     useEffect(() => {
         const handleScroll = () => {
-            if (window.scrollY > 10) {
+            if (window.scrollY > 20) {
                 setScrolled(true);
             } else {
                 setScrolled(false);
@@ -41,101 +44,155 @@ const Header: React.FC = () => {
                 historySection.scrollIntoView({ behavior: 'smooth' });
             }
         } else {
-            // Navigate to dashboard with hash
-            navigate('/dashboard#history');
+            // Navigate to dashboard and then scroll after navigation is complete
+            navigate('/dashboard');
+            // Use setTimeout to ensure DOM is updated after navigation
+            setTimeout(() => {
+                const historySection = document.querySelector('.dashboard-header');
+                if (historySection) {
+                    historySection.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, 100);
         }
     }
+    
+    // Handle clicks outside the dropdown to close it
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+                setIsDropdownOpen(false);
+            }
+        };
+        
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+        };
+    }, []);
 
     return (
-        <header className={`header${scrolled ? ' scrolled' : ''}`} style={{
-            backgroundColor: 'var(--header-bg)',
-            borderBottom: '1px solid var(--header-border)',
-            boxShadow: scrolled ? 'var(--shadow-md)' : 'var(--shadow-sm)',
-            transition: 'all 0.3s ease',
-            position: 'sticky',
-            top: 0,
-            zIndex: 1000
-        }}>
-            <div className="container flex items-center justify-between" style={{
-                height: '100%',
-                maxWidth: 'var(--container-width)',
-                margin: '0 auto',
-                padding: '0 var(--spacing-md)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                width: '100%'
-            }}>
+        <header className={`header${scrolled ? ' scrolled' : ''} ${theme}`}>
+            <div className="container">
                 <div className="logo-container">
-                    <Link to="/" className="logo-link">
+                    <Link to="/" className="app-logo">
                         <div className="logo-icon">
-                            {/* Investment Chart Icon */}
-                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M3 3v17a1 1 0 0 0 1 1h17v-2H5V3H3z"/>
-                                <path d="M15.293 14.707a.999.999 0 0 0 1.414 0l5-5-1.414-1.414L16 12.586l-2.293-2.293a.999.999 0 0 0-1.414 0l-5 5 1.414 1.414L13 12.414l2.293 2.293z"/>
-                                <circle cx="7.5" cy="7.5" r="1.5" />
-                                <circle cx="12" cy="10" r="1.5" />
-                                <circle cx="16.5" cy="7.5" r="1.5" />
+                            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M2 22h20"></path>
+                                <path d="M10 3L2 10l8 7"></path>
+                                <path d="M14 3l8 7-8 7"></path>
+                                <path d="M10 18V3"></path>
+                                <path d="M14 6v15"></path>
                             </svg>
-                            <div className="logo-circles">
-                                <div className="logo-circle1"></div>
-                                <div className="logo-circle2"></div>
-                            </div>
                         </div>
-                        <span className="logo-text-gradient">
-                            <span style={{ fontWeight: 800, color: 'var(--primary-color)' }}>Invest</span>Analyzer
-                        </span>
+                        <span className="logo-text">InvestAnalyzer<span className="logo-dot">.</span></span>
                     </Link>
                 </div>
+
+                {/* Mobile menu button */}
                 <button 
-                    className="mobile-menu-button md:hidden"
+                    className="mobile-menu-toggle"
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
                     aria-label="Toggle menu"
                 >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16">
-                        {isMobileMenuOpen ? (
-                            <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
-                        ) : (
-                            <path d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/>
-                        )}
-                    </svg>
+                    <div className={`hamburger ${isMobileMenuOpen ? 'active' : ''}`}>
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
                 </button>
-                <nav 
-                    className={`nav-links${isMobileMenuOpen ? ' mobile-menu-open' : ''}`}
-                    style={{ display: isMobileMenuOpen ? 'flex' : '' }}
-                >
-                    <ThemeToggle />
+
+                {/* Navigation links */}
+                <nav className={`nav-links ${isMobileMenuOpen ? 'open' : ''}`}>
                     {isAuthenticated ? (
                         <>
                             <Link 
                                 to="/dashboard" 
-                                className="nav-link"
+                                className={`nav-link ${location.pathname === '/dashboard' ? 'active' : ''}`}
                                 onClick={handleDashboardClick}
                             >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="14" width="7" height="7"></rect>
+                                    <rect x="3" y="14" width="7" height="7"></rect>
+                                </svg>
                                 Dashboard
-                                {location.pathname === '/dashboard' && (
-                                    <span className="nav-link-underline"></span>
-                                )}
                             </Link>
-                            <button 
-                                onClick={logout}
-                                className="btn btn-primary"
-                                style={{ marginLeft: 8 }}
-                            >
-                                Logout
-                            </button>
+                            
+                            {/* User dropdown */}
+                            <div className="user-dropdown-container" ref={dropdownRef}>
+                                <button 
+                                    className={`user-dropdown-toggle ${isDropdownOpen ? 'active' : ''}`}
+                                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                                >
+                                    <div className="avatar">
+                                        {user?.name?.charAt(0) || 'U'}
+                                    </div>
+                                    <div className="dropdown-arrow">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <polyline points="6 9 12 15 18 9"></polyline>
+                                        </svg>
+                                    </div>
+                                </button>
+                                
+                                {isDropdownOpen && (
+                                    <div className="dropdown-menu">
+                                        <div className="dropdown-header">
+                                            <div className="avatar-lg">
+                                                {user?.name?.charAt(0) || 'U'}
+                                            </div>
+                                            <div className="user-info">
+                                                <div className="user-name">{user?.name || 'User'}</div>
+                                                <div className="user-email">{user?.email || 'user@example.com'}</div>
+                                            </div>
+                                        </div>
+                                        <div className="dropdown-divider"></div>
+                                        <Link to="/dashboard" className="dropdown-item">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <rect x="3" y="3" width="7" height="7"></rect>
+                                                <rect x="14" y="3" width="7" height="7"></rect>
+                                                <rect x="14" y="14" width="7" height="7"></rect>
+                                                <rect x="3" y="14" width="7" height="7"></rect>
+                                            </svg>
+                                            Dashboard
+                                        </Link>
+                                        <button onClick={logout} className="dropdown-item">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                                                <polyline points="16 17 21 12 16 7"></polyline>
+                                                <line x1="21" y1="12" x2="9" y2="12"></line>
+                                            </svg>
+                                            Logout
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                            
+                            <ThemeToggle />
+                            
                         </>
                     ) : (
-                        <Link 
-                            to="/login"
-                            className="btn btn-primary"
-                            style={{ marginLeft: 8 }}
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                                <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/>
-                            </svg>
-                            Login
-                        </Link>
+                        <>
+                            <ThemeToggle />
+                            
+                            <Link to="/login" className={`nav-link ${location.pathname === '/login' ? 'active' : ''}`}>
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M15 3h4a2 2 0 0 1-2 2v14a2 2 0 0 1-2 2h-4"></path>
+                                    <polyline points="10 17 15 12 10 7"></polyline>
+                                    <line x1="15" y1="12" x2="3" y2="12"></line>
+                                </svg>
+                                Login
+                            </Link>
+                            <Link to="/register" className="btn btn-primary">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                    <circle cx="8.5" cy="7" r="4"></circle>
+                                    <line x1="20" y1="8" x2="20" y2="14"></line>
+                                    <line x1="23" y1="11" x2="17" y2="11"></line>
+                                </svg>
+                                Register
+                            </Link>
+                        </>
                     )}
                 </nav>
             </div>

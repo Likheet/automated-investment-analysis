@@ -80,38 +80,8 @@ function AppContent(): React.ReactElement {
 
                     {/* Auth Routes (Only when NOT logged in) */}
                     <Route element={<PublicOnlyRoute />}>
-                        <Route path="/login" element={
-                            <div className="auth-container">
-                                <div className="auth-card">
-                                    <LoginPage />
-                                </div>
-                                <div className="auth-banner">
-                                    <h2>Analyze Investment Reports with AI</h2>
-                                    <p>Upload financial reports and get instant analysis to make smarter investment decisions.</p>
-                                    <div className="auth-banner-decoration">
-                                        <div className="decoration-circle"></div>
-                                        <div className="decoration-square"></div>
-                                        <div className="decoration-triangle"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        } />
-                        <Route path="/register" element={
-                            <div className="auth-container">
-                                <div className="auth-card">
-                                    <RegisterPage />
-                                </div>
-                                <div className="auth-banner">
-                                    <h2>Join InvestAnalyzer</h2>
-                                    <p>Create an account to get access to our AI-powered investment analysis tools.</p>
-                                    <div className="auth-banner-decoration">
-                                        <div className="decoration-line"></div>
-                                        <div className="decoration-dot"></div>
-                                        <div className="decoration-ring"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        } />
+                        <Route path="/login" element={<LoginPage />} />
+                        <Route path="/register" element={<RegisterPage />} />
                     </Route>
 
                     {/* Google OAuth Callback Route */}
@@ -126,52 +96,44 @@ function AppContent(): React.ReactElement {
                                         <h1>Investment Report Analysis</h1>
                                         <p>Upload financial reports to analyze with our AI tools</p>
                                     </div>
-                                    <div className="header-decoration">
-                                        <div className="decoration-shape shape1"></div>
-                                        <div className="decoration-shape shape2"></div>
-                                        <div className="decoration-shape shape3"></div>
-                                    </div>
                                 </div>
                                 
                                 <div className="features-grid">
-                                    <div className="feature-card">
-                                        <div className="feature-icon">📊</div>
+                                    <div className="feature-card card">
                                         <h3>Upload Reports</h3>
-                                        <p>Upload your financial documents for AI analysis</p>
+                                        <p>Upload documents for analysis</p>
                                     </div>
-                                    <div className="feature-card">
-                                        <div className="feature-icon">🔍</div>
-                                        <h3>Deep Analysis</h3>
-                                        <p>Get comprehensive insights from your reports</p>
+                                    <div className="feature-card card">
+                                        <h3>Analysis</h3>
+                                        <p>Get insights from reports</p>
                                     </div>
-                                    <div className="feature-card">
-                                        <div className="feature-icon">📈</div>
-                                        <h3>Investment Recommendations</h3>
-                                        <p>Receive data-backed investment suggestions</p>
+                                    <div className="feature-card card">
+                                        <h3>Recommendations</h3>
+                                        <p>Data-backed suggestions</p>
                                     </div>
                                 </div>
 
-                                <section className="upload-section card">
+                                <div className="card">
                                     <h2>Upload New Report</h2>
                                     <FileUpload />
-                                </section>
+                                </div>
                                 
-                                <section className="analysis-section card">
-                                    <h2>Your Analysis History</h2>
+                                <div className="card">
+                                    <h2>Analysis History</h2>
                                     <UserDashboard />
-                                </section>
+                                </div>
                                 
-                                <div className="info-container">
-                                    <div className="info-card">
+                                <div className="features-grid">
+                                    <div className="card">
                                         <h3>About Our Analysis</h3>
-                                        <p>Our AI-powered analysis uses machine learning to extract key insights from investment reports and financial documents. We identify growth opportunities, risks, and trends to help you make informed decisions.</p>
+                                        <p>AI-powered insights from financial documents to help make informed decisions.</p>
                                     </div>
-                                    <div className="info-card">
+                                    <div className="card">
                                         <h3>How It Works</h3>
-                                        <p>1. Upload your financial report<br />
-                                        2. Our AI analyzes the content<br />
-                                        3. Review detailed insights and recommendations<br />
-                                        4. Make better investment decisions</p>
+                                        <p>1. Upload report<br />
+                                        2. AI analysis<br />
+                                        3. Review insights<br />
+                                        4. Make decisions</p>
                                     </div>
                                 </div>
                                 

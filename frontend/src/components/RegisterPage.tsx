@@ -37,10 +37,11 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
     };
 
     return (
-        <div className="auth-container">
-            <div className="auth-card">
-                <div className="card-header">
-                    <h2 className="text-center" style={{margin: 0}}>Create Account</h2>
+        <div className="auth-container" style={{ minHeight: '100vh', alignItems: 'center', justifyContent: 'center', display: 'flex', padding: '0 1rem' }}>
+            <div className="auth-card" style={{ maxWidth: 420, width: '100%', margin: '0 auto', boxShadow: 'var(--shadow-lg)', borderRadius: 'var(--radius-xl)', background: 'var(--card-bg)', padding: '2.5rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div className="card-header" style={{ marginBottom: '2rem', textAlign: 'center' }}>
+                    <h2 style={{ fontSize: '2rem', marginBottom: 8, fontWeight: 600 }}>Create Account</h2>
+                    <p style={{ color: 'var(--text-secondary)', margin: 0 }}>Join InvestAnalyzer today</p>
                 </div>
                 <div className="card-body">
                     <form onSubmit={handleSubmit}>
@@ -101,12 +102,12 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
                             />
                         </div>
                         {error && (
-                            <div className="error-message" style={{marginBottom: 'var(--spacing-lg)'}}>
+                            <div className="error-message alert alert-error" style={{ fontSize: '0.9rem', marginBottom: 16, padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
                                 {error}
                             </div>
                         )}
                         {successMessage && (
-                            <div className="success-message" style={{marginBottom: 'var(--spacing-lg)'}}>
+                            <div className="success-message alert alert-success" style={{ fontSize: '0.9rem', marginBottom: 16, padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
                                 {successMessage}
                             </div>
                         )}
@@ -114,27 +115,20 @@ const RegisterPage: React.FC<RegisterPageProps> = () => {
                             type="submit" 
                             className="btn btn-primary" 
                             disabled={isLoading} 
-                            style={{width: '100%', marginBottom: 'var(--spacing-md)'}}>
+                            style={{ width: '100%', marginTop: 12, padding: 'var(--spacing-md)', fontSize: '1rem' }}>
                             {isLoading ? (
                                 <>
-                                    <div className="loading-spinner" style={{width: '1rem', height: '1rem', borderWidth: '2px', margin: '0 var(--spacing-sm) 0 0'}}></div>
+                                    <div className="loading-spinner" style={{ width: '1rem', height: '1rem', marginRight: 'var(--spacing-xs)', border: '2px solid rgba(255, 255, 255, 0.3)', borderTopColor: 'white', display: 'inline-block' }}></div>
                                     Creating Account...
                                 </>
                             ) : 'Create Account'}
                         </button>
                     </form>
-                    <div className="text-center mt-2">
-                        <p>Already have an account? <Link to="/login">Sign in</Link></p>
+                    <div style={{ textAlign: 'center', marginTop: 24 }}>
+                        <p style={{ color: 'var(--text-secondary)', margin: 0 }}>
+                            Already have an account? <Link to="/login" style={{ color: 'var(--primary-color)', fontWeight: 500 }}>Sign in</Link>
+                        </p>
                     </div>
-                </div>
-            </div>
-            <div className="auth-banner">
-                <h2>Join InvestAnalyzer</h2>
-                <p>Create an account to get access to our AI-powered investment analysis tools.</p>
-                <div className="auth-banner-decoration">
-                    <div className="decoration-line"></div>
-                    <div className="decoration-dot"></div>
-                    <div className="decoration-ring"></div>
                 </div>
             </div>
         </div>

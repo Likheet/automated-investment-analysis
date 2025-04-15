@@ -5,6 +5,7 @@ import React, { createContext, useState, useContext, useEffect, ReactNode } from
 interface User {
     id: number;
     email: string;
+    name: string;
     created_at: string;
     // Add other fields if returned and needed (e.g., firstName)
 }

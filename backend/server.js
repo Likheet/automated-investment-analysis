@@ -505,7 +505,7 @@ app.get('/', (req, res) => {
 });
 
 // Update the main upload route to include status updates
-app.post('/upload', authMiddleware, uploadLimiter, (req, res) => {
+app.post('/api/analysis/upload', authMiddleware, uploadLimiter, (req, res) => {
     const userId = req.user.userId;
     const userEmail = req.user.email;
 

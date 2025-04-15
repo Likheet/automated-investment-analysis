@@ -18,7 +18,6 @@ const LoginPage: React.FC = () => {
         setIsLoading(true);
 
         try {
-            // Make the API call ourselves to get both token and user data
             const response = await axios.post('http://localhost:5001/api/auth/login', {
                 email,
                 password
@@ -34,14 +33,14 @@ const LoginPage: React.FC = () => {
     };
 
     return (
-        <div className="auth-container">
-            <div className="auth-card">
-                <div className="card-header text-center border-bottom-0 bg-transparent pt-4">
-                    <h1 className="text-2xl font-semibold mb-1">Welcome Back</h1>
-                    <p className="text-muted">Sign in to your account</p>
+        <div className="auth-container" style={{ minHeight: '100vh', alignItems: 'center', justifyContent: 'center', display: 'flex', padding: '0 1rem' }}>
+            <div className="auth-card" style={{ maxWidth: 420, width: '100%', margin: '0 auto', boxShadow: 'var(--shadow-lg)', borderRadius: 'var(--radius-xl)', background: 'var(--card-bg)', padding: '2.5rem 2rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                <div className="card-header text-center border-bottom-0 bg-transparent pt-4" style={{ marginBottom: '2rem' }}>
+                    <h1 className="text-2xl font-semibold mb-1" style={{ fontSize: '2rem', marginBottom: 8 }}>Welcome Back</h1>
+                    <p className="text-muted" style={{ color: 'var(--text-secondary)' }}>Sign in to your account</p>
                 </div>
                 <div className="card-body">
-                    <form onSubmit={handleSubmit} className="space-y-4">
+                    <form onSubmit={handleSubmit}>
                         <div className="form-group">
                             <label htmlFor="email" className="form-label">Email Address</label>
                             <input
@@ -56,7 +55,7 @@ const LoginPage: React.FC = () => {
                             />
                         </div>
                         <div className="form-group">
-                            <div className="flex justify-between items-center mb-1">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                                 <label htmlFor="password" className="form-label">Password</label>
                                 <Link to="/forgot-password" className="text-sm hover-underline" style={{ color: 'var(--primary-color)' }}>
                                     Forgot Password?
@@ -74,7 +73,7 @@ const LoginPage: React.FC = () => {
                             />
                         </div>
                         {error && (
-                            <div className="error-message" style={{marginBottom: 'var(--spacing-lg)'}}>
+                            <div className="error-message alert alert-error" style={{ fontSize: '0.9rem', marginBottom: 16, padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
                                 {error}
                             </div>
                         )}
@@ -82,7 +81,7 @@ const LoginPage: React.FC = () => {
                             type="submit"
                             className="btn btn-primary w-full"
                             disabled={isLoading}
-                            style={{ padding: 'var(--spacing-md)', fontSize: '1rem', position: 'relative', overflow: 'hidden' }}
+                            style={{ padding: 'var(--spacing-md)', fontSize: '1rem', width: '100%', marginTop: 12 }}
                         >
                             {isLoading ? (
                                 <>
@@ -91,21 +90,13 @@ const LoginPage: React.FC = () => {
                                 </>
                             ) : 'Sign in'}
                         </button>
-                        <p className="text-center text-muted mt-4">
+                        <p className="text-center text-muted mt-4" style={{ marginTop: 24, color: 'var(--text-secondary)', margin: 0 }}>
                             Don't have an account?{' '}
-                            <Link to="/register" className="link-primary hover-underline" style={{ color: 'var(--primary-color)' }}>
+                            <Link to="/register" className="link-primary hover-underline" style={{ color: 'var(--primary-color)', fontWeight: 500 }}>
                                 Create one now
                             </Link>
                         </p>
                     </form>
-                </div>
-            </div>
-            <div className="auth-banner">
-                <h2>Analyze Investment Reports with AI</h2>
-                <p>Upload financial reports and get instant analysis to make smarter investment decisions.</p>
-                <div className="auth-banner-decoration">
-                    <div className="decoration-circle"></div>
-                    <div className="decoration-square"></div>
                 </div>
             </div>
         </div>
