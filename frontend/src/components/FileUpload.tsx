@@ -87,7 +87,7 @@ const styles = {
     marginBottom: 'var(--spacing-xl)',
     backgroundColor: isDragging 
       ? `rgba(var(--primary-color-rgb), ${theme === 'dark' ? '0.1' : '0.05'})` 
-      : theme === 'dark' ? 'rgba(255, 255, 255, 0.03)' : 'rgba(0, 0, 0, 0.02)',
+      : 'var(--card-bg)',
     transition: 'all 0.3s var(--transition-bounce)',
     display: 'flex',
     flexDirection: 'column' as const,
@@ -112,15 +112,13 @@ const styles = {
     pointerEvents: 'none' as const
   }),
   
-  dropIcon: (isDragging: boolean, theme: string): CSSProperties => ({
+  dropIcon: (isDragging: boolean): CSSProperties => ({
     width: '80px',
     height: '80px',
     borderRadius: 'var(--radius-full)',
     backgroundColor: isDragging
       ? 'rgba(var(--primary-color-rgb), 0.2)'
-      : theme === 'dark'
-      ? 'rgba(255, 255, 255, 0.06)'
-      : 'rgba(0, 0, 0, 0.03)',
+      : 'var(--bg-secondary)',
     margin: '0 auto var(--spacing-lg)',
     display: 'flex',
     alignItems: 'center',
@@ -177,12 +175,12 @@ const styles = {
     lineHeight: 1.5,
   } as CSSProperties,
   
-  selectedFile: (theme: string): CSSProperties => ({
+  selectedFile: (): CSSProperties => ({
     display: 'flex',
     alignItems: 'center',
     gap: 'var(--spacing-md)',
     padding: 'var(--spacing-md) var(--spacing-lg)',
-    backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+    backgroundColor: 'var(--card-bg)',
     borderRadius: 'var(--radius-lg)',
     marginBottom: 'var(--spacing-lg)',
     border: '1px solid var(--border-color)',
@@ -226,8 +224,8 @@ const styles = {
     color: 'var(--text-secondary)',
   } as CSSProperties,
   
-  fileRemoveBtn: (theme: string): CSSProperties => ({
-    backgroundColor: theme === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+  fileRemoveBtn: (): CSSProperties => ({
+    backgroundColor: 'var(--bg-secondary)',
     color: 'var(--text-secondary)',
     width: '36px',
     height: '36px',
@@ -296,10 +294,10 @@ const styles = {
     gap: 'var(--spacing-sm)',
     backgroundColor:
       type === 'success'
-        ? 'rgba(16, 185, 129, 0.1)'
+        ? 'var(--success-bg, rgba(16, 185, 129, 0.1))'
         : type === 'error'
-        ? 'rgba(239, 68, 68, 0.1)'
-        : 'rgba(59, 130, 246, 0.1)',
+        ? 'var(--error-bg, rgba(239, 68, 68, 0.1))'
+        : 'var(--info-bg, rgba(59, 130, 246, 0.1))',
     borderLeft: `4px solid ${
       type === 'success' ? 'var(--success)' : type === 'error' ? 'var(--error)' : 'var(--info)'
     }`,
@@ -735,7 +733,7 @@ const FileUpload: React.FC = () => {
               style={{ display: 'none' }}
             />
             
-            <div style={styles.dropIcon(isDragging, theme)}>
+            <div style={styles.dropIcon(isDragging)}>
               <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                 <polyline points="17 8 12 3 7 8"></polyline>
@@ -772,7 +770,7 @@ const FileUpload: React.FC = () => {
         )}
         
         {selectedFile && !showProgress && (
-          <div style={styles.selectedFile(theme)} className="file-card">
+          <div style={styles.selectedFile()} className="file-card">
             <div style={styles.fileIcon}>
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
@@ -789,7 +787,7 @@ const FileUpload: React.FC = () => {
                 setSelectedFile(null); 
                 setMessage('');
               }}
-              style={styles.fileRemoveBtn(theme)}
+              style={styles.fileRemoveBtn()}
               aria-label="Remove file"
               className="file-remove-btn"
             >

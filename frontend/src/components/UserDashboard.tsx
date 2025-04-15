@@ -874,7 +874,26 @@ const UserDashboard: React.FC = () => {
             {showToast && (
                 <div className={`toast toast-${toastType}`}>
                     <span>{toastMessage}</span>
-                    <button onClick={hideToast}>&times;</button>
+                    <button 
+                        onClick={hideToast} 
+                        className="toast-close-btn"
+                        aria-label="Close notification"
+                    >
+                        <svg 
+                            xmlns="http://www.w3.org/2000/svg" 
+                            width="16" 
+                            height="16" 
+                            viewBox="0 0 24 24" 
+                            fill="none" 
+                            stroke="currentColor" 
+                            strokeWidth="2" 
+                            strokeLinecap="round" 
+                            strokeLinejoin="round"
+                        >
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
                 </div>
             )}
 
@@ -1225,6 +1244,21 @@ const UserDashboard: React.FC = () => {
 
                 .toast-error {
                     background-color: rgba(239, 68, 68, 0.95);
+                }
+
+                .toast-close-btn {
+                    background: none;
+                    border: none;
+                    cursor: pointer;
+                    color: white;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 0;
+                }
+
+                .toast-close-btn:hover {
+                    color: var(--primary-color);
                 }
 
                 /* Animations */
