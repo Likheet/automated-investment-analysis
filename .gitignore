@@ -40,3 +40,5 @@ temp-reports/
 frontend/dist/
 frontend/node_modules/
 frontend/public/*.svg
+
+demo-video.mp4
