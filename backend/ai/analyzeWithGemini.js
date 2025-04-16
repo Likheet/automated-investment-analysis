@@ -7,6 +7,58 @@ const geminiModel = genAI.getGenerativeModel({
     generationConfig: { responseMimeType: "application/json" },
 });
 
+// Function to sanitize and fix common JSON issues
+function sanitizeJsonString(jsonString) {
+    // If it's not a string, return it as is
+    if (typeof jsonString !== 'string') return jsonString;
+    
+    try {
+        // First check if it's already valid JSON
+        JSON.parse(jsonString);
+        return jsonString;
+    } catch (e) {
+        console.log("Attempting to sanitize malformed JSON...");
+        
+        // Remove any non-printable ASCII characters
+        let sanitized = jsonString.replace(/[\x00-\x1F\x7F-\x9F]/g, '');
+        
+        // Fix issues with escaped quotes within strings
+        sanitized = sanitized.replace(/(\\*")(.*?)(")/g, (match, p1, p2, p3) => {
+            // If quotes are already properly escaped, leave them
+            if (p1 === '\\"' && p3 === '\\"') return match;
+            // Otherwise, ensure content inside quotes is properly escaped
+            const escaped = p2.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            return `"${escaped}"`;
+        });
+        
+        // Fix JSON structure issues by ensuring property names are quoted
+        sanitized = sanitized.replace(/(\s*?{\s*?|\s*?,\s*?)(['"])?([a-zA-Z0-9_]+)(['"])?:/g, '$1"$3":');
+        
+        // Try to parse the sanitized string
+        try {
+            JSON.parse(sanitized);
+            console.log("JSON successfully sanitized.");
+            return sanitized;
+        } catch (e) {
+            // If still failing, extract JSON from the response text (in case there's extra content)
+            console.log("First-level sanitization failed, attempting to extract JSON...");
+            const jsonMatch = jsonString.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                try {
+                    const extractedJson = jsonMatch[0];
+                    JSON.parse(extractedJson);
+                    return extractedJson;
+                } catch (e) {
+                    console.error("Failed to extract valid JSON:", e);
+                    throw new Error(`Unable to sanitize malformed JSON: ${e.message}`);
+                }
+            }
+            console.error("No valid JSON structure found in the response");
+            throw new Error(`Unable to extract valid JSON structure: ${e.message}`);
+        }
+    }
+}
+
 async function callGeminiWithRetry(prompt, maxRetries = 2) {
     let retries = 0;
     while (retries <= maxRetries) {
@@ -144,7 +196,10 @@ ${fullDeckText}
         const responseText = await callGeminiWithRetry(analysisPrompt);
         console.log("Raw Gemini Response Text Received.");
         try {
-            let analysisResult = JSON.parse(responseText);
+            // Apply the JSON sanitizer before parsing
+            const sanitizedResponse = sanitizeJsonString(responseText);
+            let analysisResult = JSON.parse(sanitizedResponse);
+            
             const requiredCategories = [
                 "Problem Statement", "Solution/Product", "Market Opportunity", "Business Model",
                 "Competitive Landscape", "Team", "Traction/Milestones",

@@ -1,3 +1,9 @@
+# Demo Video
+
+[![Demo Video](https://img.youtube.com/vi/VIDEO_ID/0.jpg)](demo-video.mp4)
+
+> **Note:** Click the image or [download/view the demo video](demo-video.mp4) directly if your markdown viewer does not support embedded playback.
+
 # InvestAnalyzer: Automated Investment Thesis Generator
 
 ## Project Objective
