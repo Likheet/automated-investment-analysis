@@ -133,21 +133,6 @@ const AboutAnalysis: React.FC = () => {
                     </div>
                 ))}
             </div>
-            
-            <div className="about-footer">
-                <div className="metrics-container">
-                    {[
-                        { value: "98%", label: "Accuracy" },
-                        { value: "5000+", label: "Reports Analyzed" },
-                        { value: "3.5M+", label: "Data Points" }
-                    ].map((metric, index) => (
-                        <div key={index} className={`metric ${isVisible ? 'animate' : ''}`} style={{animationDelay: `${0.8 + index * 0.2}s`}}>
-                            <div className="metric-value">{metric.value}</div>
-                            <div className="metric-label">{metric.label}</div>
-                        </div>
-                    ))}
-                </div>
-            </div>
 
             <style>{`
                 .about-analysis {
@@ -465,7 +450,7 @@ function AppContent(): React.ReactElement {
                                 </div>
 
                                 <div className="card">
-                                    <h2>Upload New Report</h2>
+                                    <h2>Upload Startup Pitch Deck</h2>
                                     <FileUpload />
                                 </div>
                                 

@@ -4,6 +4,199 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { format } from 'date-fns';
 
+// Global file drop detection
+interface GlobalDropZoneProps {
+    onFileAccepted: (file: File) => void;
+}
+
+const GlobalDropZone: React.FC<GlobalDropZoneProps> = ({ onFileAccepted }) => {
+    const [isDragging, setIsDragging] = useState(false);
+    const dragCounter = useRef(0);
+    const { theme } = useTheme();
+
+    const handleDrag = useCallback((e: DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+    }, []);
+
+    const handleDragIn = useCallback((e: DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter.current++;
+        
+        if (e.dataTransfer?.items && e.dataTransfer.items.length > 0) {
+            // Check if at least one file being dragged is a PowerPoint file
+            const hasPowerPoint = Array.from(e.dataTransfer.items).some(item => {
+                if (item.kind === 'file') {
+                    const file = item.getAsFile();
+                    if (file) {
+                        const extension = file.name.split('.').pop()?.toLowerCase();
+                        return extension === 'ppt' || extension === 'pptx' ||
+                               file.type === 'application/vnd.ms-powerpoint' ||
+                               file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+                    }
+                }
+                return false;
+            });
+
+            if (hasPowerPoint) {
+                setIsDragging(true);
+            }
+        }
+    }, []);
+
+    const handleDragOut = useCallback((e: DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter.current--;
+        if (dragCounter.current === 0) {
+            setIsDragging(false);
+        }
+    }, []);
+
+    const handleDrop = useCallback((e: DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        dragCounter.current = 0;
+        
+        if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+            const file = e.dataTransfer.files[0];
+            const extension = file.name.split('.').pop()?.toLowerCase();
+            
+            // Check if file is a PowerPoint
+            if (extension === 'ppt' || extension === 'pptx' || 
+                file.type === 'application/vnd.ms-powerpoint' ||
+                file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+                
+                onFileAccepted(file);
+            }
+        }
+    }, [onFileAccepted]);
+
+    useEffect(() => {
+        window.addEventListener('dragenter', handleDragIn);
+        window.addEventListener('dragleave', handleDragOut);
+        window.addEventListener('dragover', handleDrag);
+        window.addEventListener('drop', handleDrop);
+        
+        return () => {
+            window.removeEventListener('dragenter', handleDragIn);
+            window.removeEventListener('dragleave', handleDragOut);
+            window.removeEventListener('dragover', handleDrag);
+            window.removeEventListener('drop', handleDrop);
+        };
+    }, [handleDrag, handleDragIn, handleDragOut, handleDrop]);
+
+    if (!isDragging) return null;
+
+    return (
+        <div className="global-drop-overlay">
+            <div className="drop-message-container">
+                <div className="drop-icon-pulse">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+                        <polyline points="13 2 13 9 20 9"></polyline>
+                    </svg>
+                </div>
+                <h2 className="drop-title">Drop it like it's hot!</h2>
+                <p className="drop-subtitle">Release to analyze your pitch deck</p>
+            </div>
+            
+            <style>{`
+                .global-drop-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background-color: ${theme === 'dark' 
+                        ? 'rgba(0, 0, 0, 0.85)' 
+                        : 'rgba(0, 0, 0, 0.7)'};
+                    z-index: 9999;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    animation: fadeIn 0.3s ease-out;
+                    backdrop-filter: blur(5px);
+                }
+                
+                .drop-message-container {
+                    background: ${theme === 'dark' 
+                        ? 'linear-gradient(135deg, rgba(13, 148, 136, 0.9), rgba(6, 182, 212, 0.9))' 
+                        : 'linear-gradient(135deg, rgba(13, 148, 136, 0.85), rgba(6, 182, 212, 0.85))'};
+                    padding: 3rem 5rem;
+                    border-radius: 20px;
+                    text-align: center;
+                    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+                    transform: scale(0.95);
+                    animation: scaleUp 0.5s cubic-bezier(0.17, 0.67, 0.83, 0.67) forwards;
+                    border: 4px dashed rgba(255, 255, 255, 0.7);
+                }
+                
+                .drop-icon-pulse {
+                    width: 120px;
+                    height: 120px;
+                    background-color: rgba(255, 255, 255, 0.2);
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 2rem;
+                    animation: pulse 2s infinite;
+                    color: white;
+                }
+                
+                .drop-title {
+                    font-size: 2.5rem;
+                    color: white;
+                    margin-bottom: 1rem;
+                    font-weight: 800;
+                    letter-spacing: 0.5px;
+                    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+                }
+                
+                .drop-subtitle {
+                    font-size: 1.3rem;
+                    color: rgba(255, 255, 255, 0.85);
+                    margin: 0;
+                }
+                
+                @keyframes pulse {
+                    0% {
+                        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+                        transform: scale(1);
+                    }
+                    70% {
+                        box-shadow: 0 0 0 20px rgba(255, 255, 255, 0);
+                        transform: scale(1.05);
+                    }
+                    100% {
+                        box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+                        transform: scale(1);
+                    }
+                }
+                
+                @keyframes fadeIn {
+                    from { opacity: 0; }
+                    to { opacity: 1; }
+                }
+                
+                @keyframes scaleUp {
+                    from { 
+                        transform: scale(0.95); 
+                        opacity: 0.5;
+                    }
+                    to { 
+                        transform: scale(1); 
+                        opacity: 1;
+                    }
+                }
+            `}</style>
+        </div>
+    );
+};
+
 interface AnalysisRecord {
     id: number;
     user_id: number;
@@ -337,6 +530,7 @@ const UserDashboard: React.FC = () => {
     const [downloadingId, setDownloadingId] = useState<number | null>(null);
     const [confirmDeleteModalOpen, setConfirmDeleteModalOpen] = useState<boolean>(false);
     const [recordToDelete, setRecordToDelete] = useState<number | null>(null);
+    const [confirmBulkDeleteModalOpen, setConfirmBulkDeleteModalOpen] = useState<boolean>(false);
     const [isRefreshHovered, setIsRefreshHovered] = useState(false);
     const [isRefreshActive, setIsRefreshActive] = useState(false);
     const [newlyCreatedId, setNewlyCreatedId] = useState<number | null>(null);
@@ -535,10 +729,11 @@ const UserDashboard: React.FC = () => {
         }
     };
 
-    // Bulk delete handler
-    const handleBulkDelete = async () => {
+    // Bulk delete handler (now only called after confirmation)
+    const handleBulkDeleteConfirmed = async () => {
         if (!token || selectedIds.length === 0) return;
         setIsLoading(true);
+        setConfirmBulkDeleteModalOpen(false);
         try {
             await Promise.all(selectedIds.map((id) =>
                 axios.delete(`http://localhost:5001/api/analysis/record/${id}`, {
@@ -555,6 +750,11 @@ const UserDashboard: React.FC = () => {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    // Handler to open the bulk delete confirmation modal
+    const handleBulkDelete = () => {
+        setConfirmBulkDeleteModalOpen(true);
     };
 
     // Get status display component
@@ -667,8 +867,27 @@ const UserDashboard: React.FC = () => {
         };
     }, [handleAnalysisComplete]);
 
+    // Handle file drop from GlobalDropZone
+    const handleFileDrop = useCallback((file: File) => {
+        console.log('File dropped:', file);
+        
+        // Create a new Event to pass to window - this will communicate with any FileUpload component
+        const dropEvent = new CustomEvent('globalFileDrop', { 
+            detail: { file }
+        });
+        
+        // Dispatch the custom event
+        window.dispatchEvent(dropEvent);
+        
+        // Show a success toast
+        setToastType('success');
+        setToastMessage('File detected! Processing your pitch deck...');
+        setShowToast(true);
+    }, []);
+
     return (
         <div className="analysis-history">
+            <GlobalDropZone onFileAccepted={handleFileDrop} />
             <div className="dashboard-header" ref={historyHeaderRef} id="history-section">
                 <div className="header-content">
                     <h1>Your Analysis History</h1>
@@ -816,7 +1035,7 @@ const UserDashboard: React.FC = () => {
                                     <th>Recommendation</th>
                                     <th>Score</th>
                                     <th>Report</th>
-                                    <th>Actions</th>
+                                    <th>Mail</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -847,9 +1066,18 @@ const UserDashboard: React.FC = () => {
                                             {getStatusDisplay(record.processing_status)}
                                         </td>
                                         <td className={`recommendation-cell ${record.recommendation ? 
-                                            (record.recommendation.includes('INVEST') ? 'recommend-invest' : 
-                                            record.recommendation.includes('HOLD') || record.recommendation.includes('WAIT') ? 'recommend-hold' : 
-                                            'recommend-pass') : ''}`}>
+                                            (record.recommendation.includes('Strong Buy') ? 'recommend-invest' : 
+                                            record.recommendation.includes('Hold') ? 'recommend-hold' : 
+                                            'recommend-pass') : ''}`} 
+                                            title={
+                                                record.recommendation === 'Strong Buy' 
+                                                    ? 'Highly promising investment opportunity with significant potential for returns. Recommended for immediate investment consideration.'
+                                                : record.recommendation === 'Hold' 
+                                                    ? 'Moderate potential with some concerns. Consider for portfolio but proceed with caution and additional due diligence.'
+                                                : record.recommendation === 'Pass'
+                                                    ? 'Significant concerns or risks identified. Not recommended for investment at this time.'
+                                                : ''
+                                            }>
                                             {record.recommendation || '-'}
                                         </td>
                                         <td className="score-cell">
@@ -884,15 +1112,26 @@ const UserDashboard: React.FC = () => {
                                         </td>
                                         <td className="actions-cell">
                                             {record.processing_status?.toUpperCase() === 'COMPLETED' && record.email_status && (
-                                                <span className={`email-status ${record.email_status === 'SENT' ? 'email-sent' : 'email-failed'}`}>
-                                                    {record.email_status === 'SENT' ? (
+                                                <span
+                                                    className={`status-badge ${record.email_status === 'SENT' ? 'status-completed' : 'status-failed'}`}
+                                                    title={
+                                                        record.email_status === 'FAILED' && record.email_failure_reason
+                                                            ? `Failed: ${record.email_failure_reason}`
+                                                            : record.email_status === 'SENT'
+                                                                ? 'Email sent successfully'
+                                                                : ''
+                                                    }
+                                                >
+                                                    {record.email_status === 'SENT' && (
                                                         <>
                                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                <polyline points="22 6 12 17 4 12"></polyline>
+                                                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
                                                             </svg>
                                                             Sent
                                                         </>
-                                                    ) : (
+                                                    )}
+                                                    {record.email_status === 'FAILED' && (
                                                         <>
                                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                                 <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -902,6 +1141,9 @@ const UserDashboard: React.FC = () => {
                                                         </>
                                                     )}
                                                 </span>
+                                            )}
+                                            {(!record.email_status || record.processing_status?.toUpperCase() !== 'COMPLETED') && (
+                                                <span className="status-badge status-unavailable">N/A</span>
                                             )}
                                         </td>
                                     </tr>
@@ -914,13 +1156,98 @@ const UserDashboard: React.FC = () => {
             
             {/* Modal & Toast */}
             {confirmDeleteModalOpen && (
-                <div className="modal-overlay">
-                    <div className="modal-content">
-                        <h3>Confirm Deletion</h3>
-                        <p>Are you sure you want to delete this record? This action cannot be undone.</p>
-                        <div className="modal-actions">
+                <div className="modal-overlay" style={{
+                    backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.18)',
+                    backdropFilter: 'blur(4px)',
+                    zIndex: 1000,
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    display: 'flex', justifyContent: 'center', alignItems: 'center',
+                }}>
+                    <div className="modal-content" style={{
+                        background: theme === 'dark' ? 'var(--card-bg, #23272f)' : '#fff',
+                        color: theme === 'dark' ? 'var(--text-primary, #fff)' : '#23272f',
+                        borderRadius: 'var(--radius-lg)',
+                        padding: 'var(--spacing-xl)',
+                        width: '90%',
+                        maxWidth: 400,
+                        boxShadow: theme === 'dark'
+                            ? '0 8px 32px 0 rgba(0,0,0,0.45)' 
+                            : '0 8px 32px 0 rgba(0,0,0,0.12)',
+                        border: theme === 'dark'
+                            ? '1px solid var(--border-color, #333)' 
+                            : '1.5px solid #e0e7ef',
+                        animation: 'modalFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}>
+                        <h3 style={{ color: theme === 'dark' ? 'var(--text-primary, #fff)' : '#23272f' }}>Confirm Deletion</h3>
+                        <p style={{ color: theme === 'dark' ? 'var(--text-secondary, #b0b8c1)' : '#4b5563' }}>
+                            Are you sure you want to delete this record? This action cannot be undone.
+                        </p>
+                        <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', marginTop: '24px' }}>
                             <button className="btn btn-error" onClick={deleteRecord}>Delete</button>
-                            <button className="btn" onClick={handleCancelDelete}>Cancel</button>
+                            <button 
+                                className="btn" 
+                                style={{
+                                    minWidth: 80,
+                                    border: theme === 'dark' ? '1px solid #444' : '1.5px solid #cbd5e1',
+                                    background: theme === 'dark' ? 'rgba(255,255,255,0.04)' : '#f3f4f6',
+                                    color: theme === 'dark' ? '#fff' : '#23272f',
+                                    fontWeight: 500,
+                                    boxShadow: theme === 'dark' ? 'none' : '0 1px 2px 0 rgba(0,0,0,0.04)'
+                                }} 
+                                onClick={handleCancelDelete}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            
+            {confirmBulkDeleteModalOpen && (
+                <div className="modal-overlay" style={{
+                    backgroundColor: theme === 'dark' ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.18)',
+                    backdropFilter: 'blur(4px)',
+                    zIndex: 1000,
+                    position: 'fixed',
+                    top: 0, left: 0, right: 0, bottom: 0,
+                    display: 'flex', justifyContent: 'center', alignItems: 'center',
+                }}>
+                    <div className="modal-content" style={{
+                        background: theme === 'dark' ? 'var(--card-bg, #23272f)' : '#fff',
+                        color: theme === 'dark' ? 'var(--text-primary, #fff)' : '#23272f',
+                        borderRadius: 'var(--radius-lg)',
+                        padding: 'var(--spacing-xl)',
+                        width: '90%',
+                        maxWidth: 400,
+                        boxShadow: theme === 'dark'
+                            ? '0 8px 32px 0 rgba(0,0,0,0.45)' 
+                            : '0 8px 32px 0 rgba(0,0,0,0.12)',
+                        border: theme === 'dark'
+                            ? '1px solid var(--border-color, #333)' 
+                            : '1.5px solid #e0e7ef',
+                        animation: 'modalFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                    }}>
+                        <h3 style={{ color: theme === 'dark' ? 'var(--text-primary, #fff)' : '#23272f' }}>Confirm Deletion</h3>
+                        <p style={{ color: theme === 'dark' ? 'var(--text-secondary, #b0b8c1)' : '#4b5563' }}>
+                            Are you sure you want to delete {selectedIds.length} selected record{selectedIds.length > 1 ? 's' : ''}? This action cannot be undone.
+                        </p>
+                        <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '16px', marginTop: '24px' }}>
+                            <button className="btn btn-error" onClick={handleBulkDeleteConfirmed}>Delete</button>
+                            <button 
+                                className="btn" 
+                                style={{
+                                    minWidth: 80,
+                                    border: theme === 'dark' ? '1px solid #444' : '1.5px solid #cbd5e1',
+                                    background: theme === 'dark' ? 'rgba(255,255,255,0.04)' : '#f3f4f6',
+                                    color: theme === 'dark' ? '#fff' : '#23272f',
+                                    fontWeight: 500,
+                                    boxShadow: theme === 'dark' ? 'none' : '0 1px 2px 0 rgba(0,0,0,0.04)'
+                                }} 
+                                onClick={() => setConfirmBulkDeleteModalOpen(false)}
+                            >
+                                Cancel
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -1169,6 +1496,11 @@ const UserDashboard: React.FC = () => {
                 .email-sent {
                     color: var(--success);
                     background-color: rgba(16, 185, 129, 0.08);
+                }
+
+                .email-sending {
+                    color: var(--info);
+                    background-color: rgba(59, 130, 246, 0.08);
                 }
 
                 .email-failed {

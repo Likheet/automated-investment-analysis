@@ -66,7 +66,6 @@ router.get('/history', authMiddleware, async (req, res) => {
     const userId = req.user.userId;
     console.log(`Fetching analysis history for User ID: ${userId}`);
     
-    // Now include email_status and email_failure_reason
     const query = `
         SELECT id, s3_key, original_filename, pdf_s3_key,
                overall_score, recommendation, processing_status, created_at,
@@ -79,14 +78,7 @@ router.get('/history', authMiddleware, async (req, res) => {
         client = await pool.connect();
         const result = await client.query(query, [userId]);
         
-        // Debug log to see what's being returned from the database
         console.log(`Found ${result.rows.length} analysis records for User ID: ${userId}`);
-        if (result.rows.length > 0) {
-            result.rows.forEach(row => {
-                console.log(`Record ID: ${row.id}, Status: ${row.processing_status}, PDF Key: ${row.pdf_s3_key || 'null'}`);
-            });
-        }
-        
         res.status(200).json(result.rows);
     } catch (error) {
         console.error(`Error fetching analysis history for User ID ${userId}:`, error);
@@ -105,12 +97,10 @@ router.delete('/history/unavailable', authMiddleware, async (req, res) => {
     try {
         client = await pool.connect();
         
-        // First get the count of records to be deleted
         const countQuery = 'SELECT COUNT(*) FROM analysis_results WHERE user_id = $1 AND processing_status = $2';
         const countResult = await client.query(countQuery, [userId, 'FILE_UNAVAILABLE']);
         const count = parseInt(countResult.rows[0].count);
         
-        // Delete the records
         const deleteQuery = 'DELETE FROM analysis_results WHERE user_id = $1 AND processing_status = $2';
         await client.query(deleteQuery, [userId, 'FILE_UNAVAILABLE']);
         
@@ -156,16 +146,11 @@ router.get('/report/:analysisId/download', authMiddleware, async (req, res) => {
         if (status === 'FAILED')
             return res.status(400).json({ message: 'Analysis failed. No report available.' });
 
-        // Format a clean download filename
         const cleanName = originalFilename 
             ? originalFilename.replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "_")
             : `Analysis_${analysisId}`;
-        const downloadFilename = `KaroStartup_Thesis_${cleanName}_${analysisId}.pdf`;
+        const downloadFilename = `InvestAnalyzer_Thesis_${cleanName}_${analysisId}.pdf`;
 
-        // Check if S3 direct URL is requested
-        const useS3Direct = req.query.mode === 'direct';
-        
-        // Try S3 signed URL first
         try {
             console.log(`Checking if file ${pdfS3Key} exists in S3...`);
             await s3Client.send(new HeadObjectCommand({
@@ -173,7 +158,6 @@ router.get('/report/:analysisId/download', authMiddleware, async (req, res) => {
                 Key: pdfS3Key
             }));
             
-            // Generate pre-signed URL for downloading
             const command = new GetObjectCommand({
                 Bucket: BUCKET_NAME,
                 Key: pdfS3Key,
@@ -181,12 +165,10 @@ router.get('/report/:analysisId/download', authMiddleware, async (req, res) => {
                 ResponseContentType: 'application/pdf'
             });
             
-            // Create signed URL with 10 minute expiration
             const expiresIn = 600;
             const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
             console.log(`Generated download URL for ${pdfS3Key}`);
 
-            // Return the signed URL
             return res.json({ 
                 downloadUrl: signedUrl,
                 filename: downloadFilename,
@@ -196,7 +178,6 @@ router.get('/report/:analysisId/download', authMiddleware, async (req, res) => {
         } catch (s3Error) {
             console.error(`S3 error with ${pdfS3Key}:`, s3Error);
             
-            // Update DB to mark this report as unavailable
             try {
                 await client.query(
                     'UPDATE analysis_results SET processing_status = $1 WHERE id = $2', 
@@ -237,8 +218,6 @@ router.get('/status/:analysisId', authMiddleware, async (req, res) => {
             [analysisId, userId]
         );
         if (result.rows.length === 0) {
-            // Grace period: if record was just created, return PENDING for 10 seconds
-            // (In practice, the frontend should only poll with a valid ID returned from upload)
             return res.status(200).json({ status: 'PENDING' });
         }
         const status = result.rows[0].processing_status;

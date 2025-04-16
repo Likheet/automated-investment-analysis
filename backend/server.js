@@ -9,25 +9,20 @@ const { spawn } = require('child_process');
 const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const FormData = require('form-data');
-const Mailgun = require('mailgun.js');
 const PDFDocument = require('pdfkit');
 const { format } = require('date-fns');
-const rateLimit = require('express-rate-limit'); // Rate Limiting
-const pool = require('./db'); // Import the database pool
-const session = require('express-session'); // Add session require
-const passport = require('passport'); // Add passport require
-require('./config/passport-setup'); // Add this line to execute the passport config
+const rateLimit = require('express-rate-limit');
+const pool = require('./db');
+const session = require('express-session');
+const passport = require('passport');
+const nodemailer = require('nodemailer');
+require('./config/passport-setup');
 
-// --- Import Routes & Middleware ---
-const authRoutes = require('./routes/auth'); // Import the auth router
-const analysisRoutes = require('./routes/analysis'); // Import the analysis router
-const userRoutes = require('./routes/users'); // Import the user router
-const authMiddleware = require('./middleware/authMiddleware'); // Import the middleware
+const authRoutes = require('./routes/auth');
+const analysisRoutes = require('./routes/analysis');
+const userRoutes = require('./routes/users');
+const authMiddleware = require('./middleware/authMiddleware');
 
-// --- Configuration ---
-
-// AWS S3
 const s3Client = new S3Client({
     region: process.env.AWS_REGION,
     credentials: {
@@ -37,63 +32,48 @@ const s3Client = new S3Client({
 });
 const BUCKET_NAME = process.env.S3_BUCKET_NAME;
 
-// Mailgun
-const mailgun = new Mailgun(FormData);
-const mg = mailgun.client({username: 'api', key: process.env.MAILGUN_API_KEY});
-const FROM_EMAIL = process.env.FROM_EMAIL;
-const MAILGUN_DOMAIN = 'sandbox47a73d27a48448629f7f866e86ebcda7.mailgun.org';
-
-// Google Gemini
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const geminiModel = genAI.getGenerativeModel({
     model: "gemini-1.5-flash-latest",
     generationConfig: { responseMimeType: "application/json" },
-    // Consider safety settings if needed
 });
 
-// Express App
 const app = express();
 const PORT = process.env.PORT || 5001;
 
-// CORS
 const corsOptions = {
-    origin: 'http://localhost:5173', // Update if frontend runs elsewhere
-    credentials: true, // Add credentials: true if using sessions/cookies with CORS
+    origin: 'http://localhost:5173',
+    credentials: true,
     optionsSuccessStatus: 200
 };
 app.use(cors(corsOptions));
-app.use(express.json()); // Add middleware to parse JSON request bodies
+app.use(express.json());
 
-// --- Session Setup (MUST be before Passport initialize) ---
 app.use(session({
-    secret: process.env.SESSION_SECRET, // Use the secret from .env
+    secret: process.env.SESSION_SECRET,
     resave: false,
-    saveUninitialized: false, // Don't save sessions until something is stored
+    saveUninitialized: false,
     cookie: {
-        // secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (requires HTTPS)
-        secure: false, // For http://localhost testing
-        maxAge: 24 * 60 * 60 * 1000 // Cookie expiration (e.g., 1 day) - independent of JWT expiration
+        secure: false, // Set true for HTTPS production
+        maxAge: 24 * 60 * 60 * 1000
     }
 }));
 
-// --- Passport Initialize ---
-app.use(passport.initialize()); // Initialize Passport
-app.use(passport.session());    // Allow Passport to use express-session
+app.use(passport.initialize());
+app.use(passport.session());
 
-// Rate Limiter for Uploads
 const uploadLimiter = rateLimit({
-    windowMs: 60 * 60 * 1000, // 1 hour
-    max: 5, // Limit each IP to 5 upload requests per windowMs
-    message: 'Too many uploads created from this IP, please try again after an hour',
-    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-    keyGenerator: (req, res) => req.user?.userId || req.ip // Rate limit based on authenticated user ID or IP if not logged in
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    message: 'Too many uploads requested, please try again after an hour',
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req, res) => req.user?.userId || req.ip
 });
 
-// Multer (Temporary Local Storage)
 const tempUploadDir = path.join(__dirname, 'temp-uploads');
 const tempReportsDir = path.join(__dirname, 'temp-reports');
-[tempUploadDir, tempReportsDir].forEach(dir => { if (!fs.existsSync(dir)) fs.mkdirSync(dir); });
+[tempUploadDir, tempReportsDir].forEach(dir => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); });
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) { cb(null, tempUploadDir); },
@@ -104,7 +84,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({
     storage: storage,
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
+    limits: { fileSize: 50 * 1024 * 1024 },
     fileFilter: function (req, file, cb) {
         const allowedExtensions = /\.(ppt|pptx)$/i;
         if (!allowedExtensions.test(path.extname(file.originalname))) {
@@ -112,10 +92,8 @@ const upload = multer({
         }
         cb(null, true);
     }
-}).single('pitchDeck'); // Frontend field name must be 'pitchDeck'
+}).single('pitchDeck');
 
-
-// --- Helper Functions ---
 
 async function uploadToS3(localFilePath, s3Key, contentType) {
     console.log(`Uploading ${s3Key} to S3...`);
@@ -135,7 +113,7 @@ async function uploadToS3(localFilePath, s3Key, contentType) {
 
 function runTextExtraction(s3Key) {
     return new Promise((resolve, reject) => {
-        const pythonExecutable = 'python'; // Adjust if needed ('python3', 'python3.11', etc.)
+        const pythonExecutable = process.env.PYTHON_EXECUTABLE || 'python';
         console.log(`Executing: ${pythonExecutable} extract_text.py ${s3Key}`);
         const pythonProcess = spawn(pythonExecutable, ['extract_text.py', s3Key], { cwd: __dirname });
         let scriptOutput = ""; let scriptError = "";
@@ -150,10 +128,13 @@ function runTextExtraction(s3Key) {
                     const result = JSON.parse(scriptOutput);
                     if (result.error) { reject(new Error(`Extraction script error: ${result.error}`)); }
                     else { resolve(result.data); }
-                } catch (e) { reject(new Error(`Failed to parse extraction script output: ${e.message}`)); }
+                } catch (e) { reject(new Error(`Failed to parse extraction script output: ${e.message}\nOutput: ${scriptOutput}`)); }
             } else {
-                 try { const errJson = JSON.parse(scriptError); if (errJson.error) { reject(new Error(`Extraction script failed: ${errJson.error}`)); return; } } catch(e) {}
-                reject(new Error(`Python script failed (code ${code}). Stderr: ${scriptError || 'None'}`));
+                 try {
+                    const errJson = JSON.parse(scriptError);
+                    if (errJson.error) { reject(new Error(`Extraction script failed: ${errJson.error}`)); return; }
+                 } catch(e) { /* Ignore */ }
+                reject(new Error(`Python script failed (code ${code}). Stderr: ${scriptError || 'None'}. Stdout: ${scriptOutput || 'None'}`));
             }
         });
         pythonProcess.on('error', (error) => reject(new Error(`Failed to start extraction script: ${error.message}`)));
@@ -161,390 +142,325 @@ function runTextExtraction(s3Key) {
 }
 
 async function analyzeWithGemini(extractedSlides) {
-    // Validate input
-    if (!extractedSlides || !Array.isArray(extractedSlides) || extractedSlides.length < 5) {
-        throw new Error("Invalid slides: Minimum 5 slides required");
+    if (!extractedSlides || !Array.isArray(extractedSlides) || extractedSlides.length === 0) {
+        throw new Error("Invalid slides: No slides extracted or data is malformed.");
     }
-    
-    if (extractedSlides.length > 20) {
-        console.warn("Warning: More than 20 slides provided, which exceeds recommendations");
+     if (extractedSlides.length < 3) {
+        console.warn(`Warning: Only ${extractedSlides.length} slides extracted. Minimum 5 recommended for full analysis.`);
     }
-    
-    // Format slides for analysis
-    let fullDeckText = extractedSlides.map(slide =>
-        `Slide ${slide.slide}:\nText: ${slide.text || 'No text'}\nNotes: ${slide.notes || 'No notes'}\n---`
+    if (extractedSlides.length > 30) {
+        console.warn("Warning: More than 30 slides provided, analysis quality may be impacted.");
+    }
+
+    let fullDeckText = extractedSlides.map((slide, index) =>
+        `Slide ${index + 1}:\nText: ${slide.text || 'No text detected'}\nNotes: ${slide.notes || 'No notes detected'}\n---`
     ).join('\n\n');
-    
-    // Add timestamp in required format
+
     const now = new Date();
     const timestamp = now.toISOString().replace(/T/, ' ').replace(/\..+/, ' UTC');
-    
-    // Enhanced prompt with all required fields and EXACT category names emphasized
+
     const analysisPrompt = `
-You are an expert venture capital analyst evaluating a startup pitch deck. 
-The pitch deck will be evaluated against the following nine categories with fixed weights and precise criteria:
+You are an expert venture capital analyst evaluating a startup pitch deck based *only* on the provided text and notes from its slides.
+Analyze the following pitch deck content against these nine categories using the defined criteria and weights.
 
-1. Problem Statement (Weight: 10%)
-   - Criteria: Clarity of problem, evidence of customer pain (e.g., stats, quotes), scope of impact.
-   - Scoring: 0 (no problem stated) to 10 (well-defined with data validation).
-
-2. Solution/Product (Weight: 15%)
-   - Criteria: Feasibility, innovation, alignment with problem, clarity of explanation.
-   - Scoring: 0 (no solution) to 10 (unique, practical, well-articulated).
-
-3. Market Opportunity (Weight: 20%)
-   - Criteria: TAM/SAM/SOM defined, realism of estimates, evidence of demand (e.g., trends, surveys).
-   - Scoring: 0 (no market data) to 10 (specific, credible, data-backed).
-
-4. Business Model (Weight: 15%)
-   - Criteria: Revenue streams, scalability, customer acquisition plan, pricing clarity.
-   - Scoring: 0 (no model) to 10 (detailed, sustainable, logical).
-
-5. Competitive Landscape (Weight: 10%)
-   - Criteria: Identification of competitors, strength of UVP, defensibility of position.
-   - Scoring: 0 (no mention) to 10 (detailed analysis with strong differentiation).
-
-6. Team (Weight: 15%)
-   - Criteria: Relevant experience, completeness of roles, evidence of execution ability.
-   - Scoring: 0 (no team info) to 10 (experienced, balanced, proven track record).
-
-7. Traction/Milestones (Weight: 10%)
-   - Criteria: Metrics (e.g., revenue, users), achieved milestones, alignment with funding ask.
-   - Scoring: 0 (no traction) to 10 (quantifiable, impressive progress).
-
-8. Financial Projections (Weight: 10%)
-   - Criteria: 3-5 year forecasts, transparency of assumptions, realism of growth rates.
-   - Scoring: 0 (no financials) to 10 (detailed, reasonable, supported).
-
-9. Clarity and Presentation (Weight: 5%)
-   - Criteria: Logical flow, visual design, grammar, conciseness (max 20 slides).
-   - Scoring: 0 (incoherent, sloppy) to 10 (polished, professional, concise).
+1.  **Problem Statement** (Weight: 10%)
+    *   Criteria: Clear problem definition? Evidence of customer pain (stats, quotes)? Significant impact shown?
+    *   Scoring: 0 (absent/unclear) to 10 (well-defined, validated pain, significant scope).
+2.  **Solution/Product** (Weight: 15%)
+    *   Criteria: Feasible solution? Innovative? Directly addresses problem? Explained clearly?
+    *   Scoring: 0 (absent/incoherent) to 10 (unique, practical, well-articulated solution).
+3.  **Market Opportunity** (Weight: 20%)
+    *   Criteria: TAM/SAM/SOM defined? Realistic estimates? Evidence of demand (trends, surveys)?
+    *   Scoring: 0 (absent/vague) to 10 (specific, credible, data-backed market sizing).
+4.  **Business Model** (Weight: 15%)
+    *   Criteria: Clear revenue streams? Scalable model? Customer acquisition strategy outlined? Pricing logical?
+    *   Scoring: 0 (absent/unclear) to 10 (detailed, sustainable, logical business model).
+5.  **Competitive Landscape** (Weight: 10%)
+    *   Criteria: Competitors identified? Unique Value Proposition (UVP) clear? Defensible position discussed?
+    *   Scoring: 0 (absent/ignored) to 10 (thorough analysis with strong, defensible differentiation).
+6.  **Team** (Weight: 10%)
+    *   Criteria: Relevant team experience presented? Key roles covered? Evidence of execution ability (past success)?
+    *   Scoring: 0 (absent/irrelevant) to 10 (experienced, balanced team with proven capabilities).
+7.  **Traction/Milestones** (Weight: 10%)
+    *   Criteria: Quantifiable progress shown (revenue, users, partnerships)? Key milestones achieved? Progress aligns with goals?
+    *   Scoring: 0 (absent/negligible) to 10 (impressive, quantifiable progress demonstrated).
+8.  **Financial Projections** (Weight: 5%)
+    *   Criteria: 3-5 year realistic forecasts included? Key assumptions stated? Growth rates justified? Funding need explained?
+    *   Scoring: 0 (absent/unrealistic) to 10 (detailed, reasonable, well-supported financial plan).
+9.  **Clarity and Presentation** (Weight: 5%)
+    *   Criteria: Logical flow of information? Text concise and understandable? Free of major grammatical errors? (Assessment based *only* on extracted text, not visuals). Maximum 20 slides recommended.
+    *   Scoring: 0 (incoherent, poorly written) to 10 (clear, concise, professional language).
 
 For each category, provide:
-1. 'score' (integer 0-10, 0=missing, 10=excellent).
-2. 'qualitative_feedback' (string 50-150 words summarizing category strengths/weaknesses based only on text).
+1.  'score': An integer from 0 to 10. Score 0 if the category is entirely missing or impossible to assess from the text.
+2.  'qualitative_feedback': A string (50-150 words) summarizing the strengths and weaknesses observed *for that category based solely on the provided text*. Be specific.
 
-Additionally, provide:
-* 'overall_strengths': Bullet list (3-5 points) of significant positive findings.
-* 'overall_weaknesses': Bullet list (3-5 points) of significant risks/gaps.
-* 'recommendation': ONE of: "Strong Buy", "Hold", or "Pass".
-* 'confidence_score': Integer (0-100) AI certainty based only on text completeness/coherence.
-* 'recommendations': 100-200 words of actionable advice for due diligence or further investigation.
-* 'processing_date': "${timestamp}"
+Additionally, provide these top-level fields:
+*   'overall_strengths': A bulleted list (as a JSON array of strings, 3-5 points) of the most significant positive aspects identified across the entire deck text.
+*   'overall_weaknesses': A bulleted list (as a JSON array of strings, 3-5 points) of the most critical risks, gaps, or areas needing improvement identified across the entire deck text.
+*   'recommendation': ONE of the following strings: "Strong Buy", "Hold", or "Pass", based on the overall assessment.
+*   'confidence_score': An integer (0-100) reflecting your certainty in this analysis, considering the completeness and coherence of the provided text. Higher score means more confidence based on available text.
+*   'recommendations_for_investor': A string (100-200 words) suggesting key questions or areas for the investor to probe further during due diligence based *only* on this text analysis.
+*   'processing_date': "${timestamp}"
 
-Return the entire analysis strictly as a single JSON object with these EXACT category names as keys (do not modify or add suffixes like "Text only"):
-"Problem Statement", "Solution/Product", "Market Opportunity", "Business Model", "Competitive Landscape", "Team", "Traction/Milestones", "Financial Projections", "Clarity and Presentation".
+Return the entire analysis STRICTLY as a single, valid JSON object. Use the EXACT category names listed above (e.g., "Problem Statement", "Solution/Product", etc.) as keys for the category objects. Ensure all requested fields are present.
 
-Pitch Deck Text:
+Pitch Deck Text Content:
 \`\`\`
 ${fullDeckText}
 \`\`\`
-    `;
-    
+`;
+
     console.log("Sending request to Gemini API...");
     try {
-        // Call API with retry logic
         const responseText = await callGeminiWithRetry(analysisPrompt);
-        
+        console.log("Raw Gemini Response Text Received.");
+
         try {
             let analysisResult = JSON.parse(responseText);
-            
-            // Handle potential numeric key structure
-            const numericCategoryKeys = Object.keys(analysisResult).filter(k => /^\d+$/.test(k) && analysisResult[k]?.category);
-            if (numericCategoryKeys.length > 0) {
-                const convertedResult = {};
-                // Copy non-numeric keys
-                for (const key of Object.keys(analysisResult)) {
-                    if (!/^\d+$/.test(key)) {
-                        convertedResult[key] = analysisResult[key];
-                    }
-                }
-                // Use the 'category' field as the key for each numeric entry
-                for (const numKey of numericCategoryKeys) {
-                    const catName = analysisResult[numKey].category;
-                    convertedResult[catName] = analysisResult[numKey];
-                }
-                analysisResult = convertedResult;
-            }
-            
-            // Define category aliases for validation
-            const categoryAliases = {
-                "Clarity and Presentation (Text only)": "Clarity and Presentation",
-                "Clarity and Presentation (Text Only)": "Clarity and Presentation"
-            };
-            
-            // Enhanced validation
-            const requiredCategories = [
-                "Problem Statement", "Solution/Product", "Market Opportunity", "Business Model", 
-                "Competitive Landscape", "Team", "Traction/Milestones", 
+
+             const requiredCategories = [
+                "Problem Statement", "Solution/Product", "Market Opportunity", "Business Model",
+                "Competitive Landscape", "Team", "Traction/Milestones",
                 "Financial Projections", "Clarity and Presentation"
             ];
 
-            const requiredFields = [
-                "recommendation", "overall_strengths", "overall_weaknesses", 
-                "confidence_score", "recommendations"
+            const requiredTopLevelFields = [
+                "overall_strengths", "overall_weaknesses", "recommendation",
+                "confidence_score", "recommendations_for_investor", "processing_date"
             ];
 
-            // Validate all categories have proper scores, accounting for aliases
-            const missingCategories = requiredCategories.filter(cat => {
-                // Check both direct name and aliases
-                const hasDirectCategory = analysisResult[cat] && 
-                                        typeof analysisResult[cat].score === 'number';
-                
-                // Check aliases
-                const hasAlias = Object.entries(categoryAliases)
-                                    .some(([alias, canonicalName]) => 
-                                        canonicalName === cat && 
-                                        analysisResult[alias] && 
-                                        typeof analysisResult[alias].score === 'number');
-                
-                return !(hasDirectCategory || hasAlias);
-            });
-            
-            // Validate all required top-level fields exist
-            const missingFields = requiredFields.filter(field => 
-                analysisResult[field] === undefined
-            );
+             const missingCategories = [];
+             const categoriesWithInvalidScores = [];
+             const missingTopLevelFields = [];
 
-            if (missingCategories.length > 0 || missingFields.length > 0) {
-                console.error("Missing categories:", missingCategories);
-                console.error("Missing fields:", missingFields);
-                throw new Error(`Analysis validation failed - missing required data`);
-            }
-            
-            // Normalize category names if aliases were used
-            for (const [alias, canonicalName] of Object.entries(categoryAliases)) {
-                if (analysisResult[alias] && !analysisResult[canonicalName]) {
-                    analysisResult[canonicalName] = analysisResult[alias];
-                    delete analysisResult[alias];
-                    console.log(`Normalized category name from "${alias}" to "${canonicalName}"`);
+            requiredCategories.forEach(cat => {
+                const categoryData = analysisResult[cat];
+                if (!categoryData) {
+                    missingCategories.push(cat);
+                } else if (typeof categoryData.score !== 'number' || categoryData.score < 0 || categoryData.score > 10) {
+                    categoriesWithInvalidScores.push(`${cat} (Score: ${categoryData.score})`);
+                 }
+             });
+
+             requiredTopLevelFields.forEach(field => {
+                if (analysisResult[field] === undefined || analysisResult[field] === null) {
+                    missingTopLevelFields.push(field);
                 }
-            }
-            
-            // Track category scores for debugging
-            const categoryScoresUsed = {};
-            for (const cat of requiredCategories) {
-                if (analysisResult[cat] && typeof analysisResult[cat].score === 'number') {
-                    categoryScoresUsed[cat] = analysisResult[cat].score;
-                } else {
-                    categoryScoresUsed[cat] = 'missing';
-                }
-            }
-            
-            // Calculate overall score
-            const calculatedScore = calculateOverallScore(analysisResult);
-            analysisResult.overall_score = calculatedScore;
-            
-            console.log("Category scores used:", JSON.stringify(categoryScoresUsed));
-            console.log("Overall score calculated:", calculatedScore);
-            
-            // If there's a pre-computed score in the response, compare them
-            if (typeof analysisResult.original_overall_score === 'number') {
-                const difference = Math.abs(analysisResult.original_overall_score - calculatedScore);
-                if (difference > 1) { // Allow for minor rounding differences
-                    console.warn(`Score discrepancy detected: calculated ${calculatedScore}, response had ${analysisResult.original_overall_score}`);
-                }
-            }
-            
-            console.log("Gemini analysis parsed and validated successfully.");
+             });
+
+             let validationErrors = [];
+            if (missingCategories.length > 0) validationErrors.push(`Missing categories: ${missingCategories.join(', ')}`);
+            if (categoriesWithInvalidScores.length > 0) validationErrors.push(`Invalid scores: ${categoriesWithInvalidScores.join(', ')}`);
+            if (missingTopLevelFields.length > 0) validationErrors.push(`Missing top-level fields: ${missingTopLevelFields.join('; ')}`);
+
+             if (categoriesWithInvalidScores.length > 0 || missingTopLevelFields.length > 0) {
+                 console.error("Gemini response validation failed:", validationErrors.join('; '));
+                 console.error("Problematic JSON received:", JSON.stringify(analysisResult, null, 2));
+                throw new Error(`Analysis validation failed: ${validationErrors.join('; ')}`);
+             }
+             if (missingCategories.length > 0) {
+                console.warn(`Warning: Gemini response missing categories: ${missingCategories.join(', ')}. These will be scored as 0.`);
+             }
+
+            analysisResult.overall_score = calculateOverallScore(analysisResult);
+
+            console.log("Gemini analysis parsed, validated, and overall score calculated successfully.");
             return analysisResult;
-        } catch (e) {
-             console.error("Failed to parse Gemini JSON:", responseText);
-             throw new Error(`Could not parse LLM JSON response: ${e.message}`);
+
+        } catch (parseError) {
+            console.error("Failed to parse Gemini JSON response:", parseError);
+            console.error("Raw response that failed parsing:\n", responseText);
+            throw new Error(`Could not parse LLM JSON response: ${parseError.message}`);
         }
     } catch (error) {
-        console.error("Error calling Gemini API:", error);
+        console.error("Error interacting with Gemini API:", error);
         throw new Error(`LLM analysis failed: ${error.message}`);
     }
 }
 
+
 async function callGeminiWithRetry(prompt, maxRetries = 2) {
     let retries = 0;
-    
     while (retries <= maxRetries) {
         try {
             const result = await geminiModel.generateContent(prompt);
+            if (!result.response) {
+                throw new Error("API returned no response object.");
+            }
+             const candidate = result.response.candidates?.[0];
+            if (candidate?.finishReason && candidate.finishReason !== 'STOP') {
+                 console.warn(`Gemini response finishReason: ${candidate.finishReason}. Safety ratings: ${JSON.stringify(candidate.safetyRatings)}`);
+            }
+             if (!result.response.text) {
+                if (candidate?.content?.parts?.[0]?.text) {
+                     console.warn("Using text from candidate content parts as response.text() was empty.");
+                     return candidate.content.parts[0].text;
+                }
+                 throw new Error("API response text is empty or undefined.");
+            }
             return result.response.text();
         } catch (error) {
             retries++;
-            console.error(`API call failed (attempt ${retries}/${maxRetries+1}):`, error);
-            
+            console.error(`Gemini API call failed (attempt ${retries}/${maxRetries+1}):`, error.message || error);
             if (retries > maxRetries) {
-                throw new Error(`Failed to analyze after ${maxRetries+1} attempts: ${error.message}`);
+                throw new Error(`Failed to get valid Gemini analysis after ${maxRetries + 1} attempts: ${error.message}`);
             }
-            
-            // Exponential backoff before retry
-            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, retries-1)));
+            const delay = 1500 * Math.pow(2, retries - 1);
+            console.log(`Retrying Gemini API call in ${delay / 1000} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
+     throw new Error(`Gemini analysis failed after all retries.`);
 }
+
 
 function calculateOverallScore(analysisResult) {
-    // Fixed weights as per requirements
+    // --- Weights corrected to sum to 1.0 ---
     const weights = {
-        "Problem Statement": 0.10,
-        "Solution/Product": 0.15,
-        "Market Opportunity": 0.20,
-        "Business Model": 0.15,
-        "Competitive Landscape": 0.10,
-        "Team": 0.15,
-        "Traction/Milestones": 0.10,
-        "Financial Projections": 0.10,
-        "Clarity and Presentation": 0.05
+        "Problem Statement": 0.10,       // 10%
+        "Solution/Product": 0.15,        // 15%
+        "Market Opportunity": 0.20,      // 20%
+        "Business Model": 0.15,          // 15%
+        "Competitive Landscape": 0.10,   // 10%
+        "Team": 0.10,                    // 10% (Adjusted from 0.15)
+        "Traction/Milestones": 0.10,     // 10%
+        "Financial Projections": 0.05,   // 5% (Adjusted from 0.10)
+        "Clarity and Presentation": 0.05 // 5%
+        // --- TOTAL: 1.00 (100%) ---
     };
-    
-    // Category aliases that might be used
-    const categoryAliases = {
-        "Clarity and Presentation (Text only)": "Clarity and Presentation",
-        "Clarity and Presentation (Text Only)": "Clarity and Presentation"
-    };
-    
+
     let totalScore = 0;
     let totalWeightUsed = 0;
-    const categoryScoresUsed = {};
-    
-    // Process each category
+    const categoryScoresForDebug = {};
+
     for (const category in weights) {
-        let categoryData = analysisResult[category];
-        
-        // Check for aliases if the main category name isn't found
-        if (!categoryData) {
-            for (const [alias, canonicalName] of Object.entries(categoryAliases)) {
-                if (canonicalName === category && analysisResult[alias]) {
-                    categoryData = analysisResult[alias];
-                    break;
-                }
-            }
-        }
-        
-        // If we have a valid score for this category, add it to the total
-        if (categoryData && typeof categoryData.score === 'number') {
-            let score = Math.max(0, Math.min(10, categoryData.score));
-            totalScore += score * weights[category];
-            totalWeightUsed += weights[category];
-            categoryScoresUsed[category] = score;
+        const categoryData = analysisResult[category];
+        const weight = weights[category];
+
+        if (categoryData && typeof categoryData.score === 'number' && categoryData.score >= 0 && categoryData.score <= 10) {
+             const score = categoryData.score;
+             totalScore += score * weight;
+            categoryScoresForDebug[category] = score;
         } else {
-            // Missing category - count as zero
-            console.warn(`Category '${category}' score missing, counting as 0`);
-            categoryScoresUsed[category] = 0;
-            // Still count the weight
-            totalWeightUsed += weights[category];
+            console.warn(`Category '${category}' missing or score invalid (${categoryData?.score}), using score 0 for calculation.`);
+             totalScore += 0 * weight;
+            categoryScoresForDebug[category] = 0;
         }
-    }
+         totalWeightUsed += weight;
+     }
 
-    // If no categories were processed at all, return 0
-    if (totalWeightUsed === 0) return 0;
-    
-    // Calculate weighted average and convert to 0-100 scale
-    const overall = Math.round((totalScore / totalWeightUsed) * 10);
-    
-    // Log detailed calculation for debugging
-    console.log("Category scores used in calculation:", JSON.stringify(categoryScoresUsed));
-    console.log(`Weighted sum: ${totalScore}, Total weight: ${totalWeightUsed}`);
-    console.log(`Calculation: (${totalScore} / ${totalWeightUsed}) * 10 = ${overall}`);
-    
-    return Math.max(0, Math.min(100, overall));
+     if (Math.abs(totalWeightUsed - 1.0) > 0.001) {
+         console.warn(`Corrected weights logic error: Total weight used (${totalWeightUsed.toFixed(2)}) is not 1.0. Re-check weights definition.`);
+         if (totalWeightUsed === 0) return 0; // Avoid division by zero if all weights somehow became 0
+     }
+
+     const effectiveTotalWeight = 1.0; // We now assume weights are correctly defined to sum to 1.0
+
+    const overall = Math.round((totalScore / effectiveTotalWeight) * 10); // Scale to 0-100
+
+    console.log("Score Calculation Details:", JSON.stringify(categoryScoresForDebug), `WeightedSum: ${totalScore.toFixed(2)}`, `TotalWeight: ${effectiveTotalWeight.toFixed(2)}`, `Final Score: ${overall}`);
+
+     return Math.max(0, Math.min(100, overall)); // Clamp score between 0 and 100
 }
 
-function prepareReportData(analysisResult) {
-    // Try to extract startup name from slides or use default
-    let startupName = extractStartupName(analysisResult) || "Startup";
-    
-    // Format date for filename (DDMMYYYY)
-    const today = new Date();
-    const dateStr = `${today.getDate().toString().padStart(2, '0')}${(today.getMonth()+1).toString().padStart(2, '0')}${today.getFullYear()}`;
-    
-    return {
+
+function prepareReportData(analysisResult, originalFileName, analysisId) {
+     let startupName = "Startup";
+    if (originalFileName) {
+        try {
+             startupName = path.basename(originalFileName, path.extname(originalFileName))
+                              .replace(/[^a-zA-Z0-9\-_ ]/g, '')
+                              .replace(/ /g, '_')
+                              .substring(0, 50);
+            if (!startupName) startupName = `Analysis_${analysisId}`;
+        } catch (e) {
+             console.warn("Could not derive startup name from filename:", e);
+             startupName = `Analysis_${analysisId}`;
+         }
+     } else {
+        startupName = `Analysis_${analysisId}`;
+     }
+
+     const today = new Date();
+     const dateStr = format(today, 'ddMMyyyy');
+
+     return {
         reportData: analysisResult,
         filename: `Investment_Thesis_${startupName}_${dateStr}.pdf`
     };
 }
 
-// Helper function to attempt extracting startup name
-function extractStartupName(analysisResult) {
-    // Look for startup name in various possible locations
-    
-    // Check if there's an explicit startup_name field
-    if (analysisResult.startup_name) {
-        return analysisResult.startup_name;
-    }
-    
-    // Try to extract from startup description in Problem Statement or Solution
-    for (const category of ["Problem Statement", "Solution/Product"]) {
-        if (analysisResult[category]?.qualitative_feedback) {
-            const feedback = analysisResult[category].qualitative_feedback;
-            
-            // Look for company name patterns like "XYZ is a..." or "At XYZ, we..."
-            const companyPatterns = [
-                /([A-Z][A-Za-z0-9]+(?:\s[A-Z][A-Za-z0-9]+)*)\s+is\s+a/,
-                /At\s+([A-Z][A-Za-z0-9]+(?:\s[A-Z][A-Za-z0-9]+)*)/
-            ];
-            
-            for (const pattern of companyPatterns) {
-                const match = feedback.match(pattern);
-                if (match && match[1]) {
-                    return match[1].trim();
-                }
-            }
-        }
-    }
-    
-    // Default fallback
-    return null;
-}
 
-function prepareReportData(analysisResult) {
-    // Try to extract startup name from slides (would need actual implementation)
-    let startupName = "Startup";
-    
-    // Format date for filename (DDMMYYYY)
-    const today = new Date();
-    const dateStr = `${today.getDate().toString().padStart(2, '0')}${(today.getMonth()+1).toString().padStart(2, '0')}${today.getFullYear()}`;
-    
-    return {
-        reportData: analysisResult,
-        filename: `Investment_Thesis_${startupName}_${dateStr}.pdf`
-    };
-}
-
-// Modify saveAnalysisToDB to include original_filename and initial status
 async function saveAnalysisToDB(s3Key, analysisResult, userId = null, originalFilename = null) {
-    const overallScore = calculateOverallScore(analysisResult);
+    // Calculate initial score (will be 0 if analysisResult is empty)
+    const overallScore = Object.keys(analysisResult).length > 0 ? calculateOverallScore(analysisResult) : 0;
     const recommendation = analysisResult?.recommendation || null;
     const confidence = analysisResult?.confidence_score || null;
 
     const query = `
         INSERT INTO analysis_results
         (s3_key, user_id, original_filename, analysis_data, overall_score, recommendation, confidence_score, processing_status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) -- Added original_filename and initial status
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING id;
     `;
     const values = [
-        s3Key,
-        userId,
-        originalFilename, // Save original name
-        analysisResult,
-        overallScore,
-        recommendation,
-        confidence,
-        'COMPLETED' // Assume complete *if analysis finished*. Set earlier if needed.
+        s3Key, userId, originalFilename,
+        analysisResult || {}, // Store empty object if not provided yet
+        overallScore, recommendation, confidence, 'PENDING' // Start as pending
     ];
     let client;
     try {
         client = await pool.connect();
         const result = await client.query(query, values);
-        console.log(`Analysis results saved to DB with ID: ${result.rows[0].id}`);
+        console.log(`Initial analysis record saved to DB with ID: ${result.rows[0].id}`);
         return result.rows[0].id;
     } catch (error) {
-        console.error("Error saving analysis to DB:", error.stack);
-        throw new Error("Failed to save analysis results to DB.");
+        console.error("Error saving initial analysis record to DB:", error.stack);
+        throw new Error("Failed to create analysis record in DB.");
     } finally {
         if (client) client.release();
     }
 }
 
-// Modify updatePdfKeyInDB to also set status to 'COMPLETED'
-async function updatePdfKeyInDB(analysisId, pdfS3Key) {
+async function updateAnalysisResultInDB(analysisId, analysisResult) {
+     const overallScore = calculateOverallScore(analysisResult);
+    const recommendation = analysisResult?.recommendation || null;
+    const confidence = analysisResult?.confidence_score || null;
+
+    const query = `
+        UPDATE analysis_results SET
+            analysis_data = $1,
+            overall_score = $2,
+            recommendation = $3,
+            confidence_score = $4,
+            updated_at = NOW()
+            -- Status is updated separately by updateAnalysisStatus
+        WHERE id = $5;
+    `;
+    const values = [
+        analysisResult, overallScore, recommendation, confidence, analysisId
+    ];
+
+    let client;
+    try {
+        client = await pool.connect();
+        const result = await client.query(query, values);
+        if (result.rowCount === 0) {
+            console.warn(`Attempted to update analysis data for non-existent ID: ${analysisId}`);
+        } else {
+             console.log(`Successfully updated analysis data in DB for ID: ${analysisId}`);
+         }
+    } catch (error) {
+        console.error(`Error updating analysis data in DB for ID ${analysisId}:`, error.stack);
+         throw new Error("Failed to update analysis details in database.");
+    } finally {
+        if (client) client.release();
+    }
+}
+
+
+async function updatePdfKeyAndComplete(analysisId, pdfS3Key) {
     const query = `
         UPDATE analysis_results
         SET pdf_s3_key = $1, processing_status = 'COMPLETED', updated_at = NOW()
@@ -556,50 +472,56 @@ async function updatePdfKeyInDB(analysisId, pdfS3Key) {
         client = await pool.connect();
         const result = await client.query(query, values);
         if (result.rowCount > 0) {
-            console.log(`Updated PDF S3 Key in DB for analysis ID: ${analysisId}`);
+            console.log(`Updated PDF S3 Key and marked COMPLETED in DB for analysis ID: ${analysisId}`);
             return true;
         } else {
-            console.warn(`Analysis ID ${analysisId} not found for PDF key update.`);
+            console.warn(`Analysis ID ${analysisId} not found for PDF key/completion update.`);
             return false;
         }
     } catch (error) {
-        console.error(`Error updating PDF Key for ID ${analysisId}:`, error.stack);
-        throw new Error("Failed to update PDF location in database.");
+        console.error(`Error updating PDF Key/completion for ID ${analysisId}:`, error.stack);
+        throw new Error("Failed to finalize PDF location in database.");
     } finally {
         if (client) client.release();
     }
 }
 
-// Optional: Add function to update status only
 async function updateAnalysisStatus(analysisId, status, failureReason = null) {
     const query = `
         UPDATE analysis_results
         SET processing_status = $1,
+            failure_reason = $2, -- Attempt to update, relies on column existing
             updated_at = NOW()
-        WHERE id = $2;
+        WHERE id = $3;
     `;
-    const values = [status, analysisId];
+     const reasonToStore = (status === 'FAILED' && failureReason) ? failureReason.substring(0, 500) : null;
+    const values = [status, reasonToStore, analysisId];
     let client;
     try {
         client = await pool.connect();
         await client.query(query, values);
-        console.log(`Updated status for Analysis ID ${analysisId} to ${status}`);
+        // Log success only if the query succeeds
+        console.log(`Updated status for Analysis ID ${analysisId} to ${status}` + (reasonToStore ? ` (Reason recorded)` : ''));
     } catch (error) {
-        console.error(`Error updating status for Analysis ID ${analysisId}:`, error.stack);
+         // Log the specific error if the update fails (e.g., column missing)
+        console.error(`Error updating status for Analysis ID ${analysisId} to ${status}:`, error.message);
+         // Do not throw here unless status update is absolutely critical to halt the process
     } finally {
         if (client) client.release();
     }
 }
+
 
 async function updateEmailStatus(analysisId, status, failureReason = null) {
     const query = `
         UPDATE analysis_results
         SET email_status = $1,
-            email_failure_reason = $2,
+            email_failure_reason = $2, -- Assumes this column exists too
             updated_at = NOW()
         WHERE id = $3;
     `;
-    const values = [status, failureReason, analysisId];
+     const reasonToStore = (status === 'FAILED' && failureReason) ? failureReason.substring(0, 255) : null;
+    const values = [status, reasonToStore, analysisId];
     let client;
     try {
         client = await pool.connect();
@@ -607,287 +529,543 @@ async function updateEmailStatus(analysisId, status, failureReason = null) {
         console.log(`Updated email status for Analysis ID ${analysisId} to ${status}`);
         return true;
     } catch (error) {
-        console.error(`Error updating email status for Analysis ID ${analysisId}:`, error.stack);
-        return false;
+        // If this fails, assume the column email_failure_reason might also be missing
+        console.error(`Error updating email status for Analysis ID ${analysisId} to ${status}:`, error.message);
+        console.error(`Please ensure 'email_status' (VARCHAR) and 'email_failure_reason' (VARCHAR) columns exist in 'analysis_results'.`);
+        return false; // Indicate failure
     } finally {
         if (client) client.release();
     }
 }
 
+
 async function generateInvestmentThesisPDF(analysisData, analysisId, originalFileName) {
      return new Promise((resolve, reject) => {
+         let pdfTempPath = null;
          try {
-             let startupName = path.basename(originalFileName, path.extname(originalFileName)).replace(/[^a-zA-Z0-9\-_ ]/g, '_').replace(/ /g, '_');
-             startupName = (!startupName || startupName.length > 50) ? `StartupAnalysis_${analysisId}` : startupName;
-             const processingDate = new Date();
-             const formattedDate = format(processingDate, 'dd-MM-yyyy HH:mm:ss \'UTC\'');
-             const reportDateFilename = format(processingDate, 'ddMMyyyy');
-             const pdfFilename = `Investment_Thesis_${startupName}_${reportDateFilename}.pdf`;
-             const pdfTempPath = path.join(tempReportsDir, pdfFilename);
+             const reportDetails = prepareReportData(analysisData, originalFileName, analysisId);
+             const pdfFilename = reportDetails.filename;
+            pdfTempPath = path.join(tempReportsDir, pdfFilename);
 
-             // Make sure the temporary directory exists
              if (!fs.existsSync(tempReportsDir)) {
                  fs.mkdirSync(tempReportsDir, { recursive: true });
-                 console.log(`Created temporary reports directory: ${tempReportsDir}`);
              }
-
              console.log(`Generating PDF for analysis ID: ${analysisId} at path: ${pdfTempPath}`);
 
              const doc = new PDFDocument({ size: 'A4', margins: { top: 50, bottom: 50, left: 60, right: 60 }, bufferPages: true });
              const writeStream = fs.createWriteStream(pdfTempPath);
+
              doc.pipe(writeStream);
-             
-             writeStream.on('error', (err) => { 
-                 console.error(`Error writing PDF to ${pdfTempPath}:`, err);
-                 doc.end(); 
-                 reject(new Error(`Failed to write PDF: ${err.message}`)); 
-             });
-             
-             writeStream.on('finish', () => { 
-                 console.log(`PDF written successfully to: ${pdfTempPath}`); 
-                 resolve({ localPath: pdfTempPath, reportFilename: pdfFilename }); 
+
+             writeStream.on('error', (err) => {
+                 console.error(`Error writing PDF stream for ${analysisId}:`, err);
+                 try { doc.end(); } catch (e) {}
+                 if (pdfTempPath && fs.existsSync(pdfTempPath)) {
+                     try { fs.unlinkSync(pdfTempPath); } catch (unlinkErr) { console.error("Error cleaning up partial PDF:", unlinkErr); }
+                 }
+                 reject(new Error(`Failed to write PDF stream: ${err.message}`));
              });
 
-             // Styles & Helpers
-             const H1 = 14, H2 = 12, P = 11, Font = 'Helvetica', FontBold = 'Helvetica-Bold';
-             const addH1 = (txt) => doc.font(FontBold).fontSize(H1).text(txt, { paragraphGap: 5 }).moveDown(0.5);
-             const addH2 = (txt) => doc.font(FontBold).fontSize(H2).text(txt, { paragraphGap: 3 }).moveDown(0.3);
-             const addSubHeading = (txt) => doc.font(FontBold).fontSize(P).text(txt, { paragraphGap: 2 }).moveDown(0.2);
-             const addP = (txt, opts={}) => doc.font(Font).fontSize(P).text(txt, { paragraphGap: 3, align: opts.align || 'justify', indent: opts.indent || 0, ...opts }).moveDown(0.5);
-             const addBullet = (txt) => addP(`• ${txt}`, {indent: 0});
+             writeStream.on('finish', () => {
+                 console.log(`PDF stream finished for ${analysisId}. File should be complete: ${pdfTempPath}`);
+                 if (!fs.existsSync(pdfTempPath) || fs.statSync(pdfTempPath).size === 0) {
+                      reject(new Error(`PDF file writing finished, but file is missing or empty: ${pdfTempPath}`));
+                 } else {
+                      resolve({ localPath: pdfTempPath, reportFilename: pdfFilename });
+                 }
+             });
 
-             // --- PDF Content Sections ---
 
-             // Summary
+            const H1 = 14, H2 = 12, P = 10, Font = 'Helvetica', FontBold = 'Helvetica-Bold', FontItalic = 'Helvetica-Oblique';
+             const lineGap = 3;
+             const paragraphGap = 6;
+             const sectionGap = 1;
+
+             const addH1 = (txt) => doc.font(FontBold).fontSize(H1).text(txt, { paragraphGap }).moveDown(sectionGap * 0.5);
+             const addH2 = (txt, options={}) => doc.font(FontBold).fontSize(H2).text(txt, { paragraphGap: paragraphGap * 0.8, underline: options.underline || false }).moveDown(sectionGap * 0.3);
+             const addSubHeading = (txt) => doc.font(FontBold).fontSize(P).text(txt, { paragraphGap: lineGap, continued: false }).moveDown(0);
+             const addP = (txt, options={}) => doc.font(Font).fontSize(P).text(txt || 'N/A', { paragraphGap, align: options.align || 'justify', indent: options.indent || 0, oblique: options.oblique || false }).moveDown(sectionGap * 0.5);
+             const addBullet = (txt) => addP(`•  ${txt || 'N/A'}`, { indent: 15, paragraphGap: lineGap * 1.5 });
+
+
+             const startupName = reportDetails.filename.split('_')[2] || 'Startup';
+             const analysisDateStr = format(new Date(analysisData.processing_date || Date.now()), 'MMMM dd, yyyy HH:mm:ss \'UTC\'');
+             const overallScore = calculateOverallScore(analysisData);
+
              addH1("Investment Thesis Summary");
-             addP(`Startup: ${startupName}`);
-             addP(`Processing Date: ${formattedDate}`);
-             addSubHeading("Recommendation:"); addP(analysisData?.recommendation || "N/A", { indent: 20 });
-             addSubHeading("Overall Score:"); addP(`${calculateOverallScore(analysisData)} / 100`, { indent: 20 });
-             doc.moveDown(1);
+             addP(`Startup Reference: ${startupName}`, { paragraphGap: lineGap });
+             addP(`Analysis Date: ${analysisDateStr}`, { paragraphGap: lineGap });
+             doc.moveDown(0.5)
+             addSubHeading("Overall Recommendation:");
+             addP(analysisData?.recommendation || "Not Available", { indent: 20 });
+             addSubHeading("Calculated Overall Score:");
+             addP(`${overallScore} / 100`, { indent: 20 });
+              addSubHeading("AI Confidence Score:");
+              addP(`${analysisData?.confidence_score ?? 'N/A'} / 100`, { indent: 20 });
+              addP("Note: Confidence reflects AI certainty based on text completeness/coherence, not investment success.", { indent: 20, oblique: true, paragraphGap: paragraphGap *1.5});
 
-              // Categories
-              addH1("Category Analysis");
-              const categoryWeights = { "Problem Statement": 10, "Solution/Product": 15, "Market Opportunity": 20, "Business Model": 15, "Competitive Landscape": 10, "Team": 15, "Traction/Milestones": 10, "Financial Projections": 10, "Clarity and Presentation (Text only)": 5 };
-              for (const category in categoryWeights) {
-                  const catData = analysisData?.[category];
-                  addH2(`${category} (${categoryWeights[category]}%)`, { underline: true });
-                  if (catData) {
-                      addSubHeading("Score:"); addP(`${catData.score ?? 'N/A'} / 10`, { indent: 20 });
-                      addSubHeading("Feedback:"); addP(catData.qualitative_feedback || "No feedback.", { indent: 20 });
-                  } else { addP("Analysis data missing for this category.", { indent: 20, oblique: true }); }
-                   doc.moveDown(0.7);
-              }
-              doc.moveDown(1);
 
-              // Strengths & Weaknesses
-              addH1("Overall Strengths & Weaknesses");
-              addSubHeading("Strengths:"); 
-              if (Array.isArray(analysisData?.overall_strengths) && analysisData.overall_strengths.length > 0) {
-                  analysisData.overall_strengths.forEach(s => addBullet(s));
-              } else {
-                  addBullet("None explicitly identified.");
-              }
-              doc.moveDown(0.5);
-              
-              addSubHeading("Weaknesses:"); 
-              if (Array.isArray(analysisData?.overall_weaknesses) && analysisData.overall_weaknesses.length > 0) {
-                  analysisData.overall_weaknesses.forEach(w => addBullet(w));
-              } else {
-                  addBullet("None explicitly identified.");
-              }
-              doc.moveDown(1);
+             addH1("Category Analysis");
+             const categoryOrder = [
+                 "Problem Statement", "Solution/Product", "Market Opportunity", "Business Model",
+                 "Competitive Landscape", "Team", "Traction/Milestones",
+                 "Financial Projections", "Clarity and Presentation"
+             ];
+            // Use corrected weights from calculateOverallScore function
+             const categoryWeights = {
+                "Problem Statement": 0.10, "Solution/Product": 0.15, "Market Opportunity": 0.20,
+                "Business Model": 0.15, "Competitive Landscape": 0.10, "Team": 0.10,
+                "Traction/Milestones": 0.10, "Financial Projections": 0.05, "Clarity and Presentation": 0.05
+            };
 
-              // Recommendations
-              addH1("Detailed Recommendations");
-              addP(analysisData?.recommendations || analysisData?.recommendation || "No specific recommendations provided beyond the overall guidance.");
-              doc.moveDown(1);
-
-             // Footer (Page Numbers)
-             const range = doc.bufferedPageRange();
-             for (let i = range.start; i <= (range.start + range.count - 1); i++) {
-                doc.switchToPage(i);
-                doc.font(Font).fontSize(9).text(`Page ${i + 1} of ${range.count}`, 50, doc.page.height - 40, { align: 'center' });
+             for (const category of categoryOrder) {
+                 const catData = analysisData[category];
+                 const weight = categoryWeights[category] * 100; // Display as percentage
+                 addH2(`${category} (${weight.toFixed(0)}%)`);
+                 if (catData) {
+                     addSubHeading("Score:");
+                     addP(`${catData.score ?? 'N/A'} / 10`, { indent: 20, paragraphGap: lineGap });
+                     addSubHeading("Feedback:");
+                     addP(catData.qualitative_feedback || "No specific feedback provided.", { indent: 20 });
+                 } else {
+                     addP("Analysis data missing for this category.", { indent: 20, oblique: true });
+                 }
+                 doc.moveDown(sectionGap * 0.7);
              }
 
-             // Finalize
+             addH1("Overall Strengths & Weaknesses");
+             addSubHeading("Identified Strengths:");
+             if (Array.isArray(analysisData?.overall_strengths) && analysisData.overall_strengths.length > 0) {
+                 analysisData.overall_strengths.forEach(s => addBullet(s));
+             } else {
+                 addBullet("None explicitly identified in the analysis.");
+             }
+             doc.moveDown(0.5);
+
+             addSubHeading("Identified Weaknesses / Gaps:");
+             if (Array.isArray(analysisData?.overall_weaknesses) && analysisData.overall_weaknesses.length > 0) {
+                 analysisData.overall_weaknesses.forEach(w => addBullet(w));
+             } else {
+                 addBullet("None explicitly identified in the analysis.");
+             }
+             doc.moveDown(1);
+
+             addH1("Recommendations for Investor Due Diligence");
+             addP(analysisData?.recommendations_for_investor || "No specific recommendations provided beyond the category feedback.");
+             doc.moveDown(1);
+
+             const range = doc.bufferedPageRange();
+             for (let i = range.start; i <= range.start + range.count - 1; i++) {
+                 doc.switchToPage(i);
+                 doc.font(FontItalic).fontSize(9)
+                    .text(`Page ${i + 1} of ${range.count}`,
+                          doc.page.margins.left,
+                          doc.page.height - doc.page.margins.bottom + 10,
+                          { align: 'center', width: doc.page.width - doc.page.margins.left - doc.page.margins.right }
+                     );
+             }
+
              doc.end();
+
          } catch (error) {
-             console.error(`Error generating PDF for analysis ${analysisId}:`, error);
+             console.error(`Fatal error during PDF generation setup for ${analysisId}:`, error);
+              if (pdfTempPath && fs.existsSync(pdfTempPath)) {
+                 try { fs.unlinkSync(pdfTempPath); } catch (unlinkErr) { console.error("Error cleaning up partial PDF after setup error:", unlinkErr); }
+             }
              reject(error);
          }
-     }); // End Promise
+     });
 }
 
-async function sendCompletionEmail(recipientEmail, analysisId, deckS3Key, pdfS3Key) {
-    if (!FROM_EMAIL) { 
-        console.warn("FROM_EMAIL not set, skipping email notification.");
-        await updateEmailStatus(analysisId, 'FAILED', 'FROM_EMAIL not configured');
-        return false; 
+
+// Create a Gmail SMTP transporter without OAuth2
+function createGmailTransporter() {
+  try {
+    console.log("Setting up Gmail transporter with direct SMTP");
+    
+    // Create transporter with direct SMTP authentication
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // TLS
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD // Using app password instead of OAuth
+      },
+      tls: {
+        rejectUnauthorized: false // Helps with certain connection issues
+      },
+      debug: true // Enable for detailed logs
+    });
+    
+    return transporter;
+  } catch (error) {
+    console.error("Error creating Gmail transporter:", error);
+    throw new Error(`Gmail configuration failed: ${error.message}`);
+  }
+}
+
+
+async function sendCompletionEmail(recipientEmail, analysisId, deckOriginalFilename, pdfS3Key) {
+    // Check essential Gmail API config first
+    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+        console.warn("Gmail API config missing, skipping email notification.");
+        await updateEmailStatus(analysisId, 'FAILED', 'Gmail API configuration missing in server');
+        return false;
     }
-    if (!recipientEmail) { 
-        console.warn(`No recipient email found for analysis ${analysisId}, skipping.`);
-        await updateEmailStatus(analysisId, 'FAILED', 'Recipient email missing');
-        return false; 
+    
+    // Then check for recipient and key needed for the email content
+    if (!recipientEmail) {
+        console.warn(`No recipient email found for analysis ${analysisId}, cannot send email.`);
+        await updateEmailStatus(analysisId, 'FAILED', 'Recipient email address missing');
+        return false;
+    }
+    
+    if (!pdfS3Key) {
+        console.warn(`PDF S3 Key missing for analysis ${analysisId}, cannot generate download link for email.`);
+        await updateEmailStatus(analysisId, 'FAILED', 'PDF S3 Key missing');
+        return false;
     }
 
-    // Create a download URL that points to our redirect endpoint
-    const backendBaseUrl = 'http://localhost:5001';
-    const downloadLink = `${backendBaseUrl}/api/analysis/report/${analysisId}/download`;
-
-    const subject = `KaroStartup: Your Pitch Deck Analysis is Ready (ID: ${analysisId})`;
-    const bodyText = `Your pitch deck analysis (Original Key: ${deckS3Key}) is complete.\n\nYou can download the PDF report here:\n${downloadLink}\n\nThank you for using KaroStartup!`;
-    const bodyHtml = `<p>Your pitch deck analysis (Original Key: ${deckS3Key}) is complete.</p><p>You can download the PDF report using the button below (link expires in 5 minutes from generation time):</p><p><a href="${downloadLink}" style="padding:10px 15px; background-color:#007bff; color:white; text-decoration:none; border-radius:5px;">Download Report PDF</a></p><p><br/>Or copy this link: ${downloadLink}</p><p>Thank you for using KaroStartup!</p>`;
-
+    let downloadUrl = '#';
     try {
-        await mg.messages.create(MAILGUN_DOMAIN, {
-            from: `KaroStartup <${FROM_EMAIL}>`,
-            to: [recipientEmail],
+        const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: pdfS3Key });
+        downloadUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 }); // Expires in 1 hour
+        console.log(`Generated pre-signed S3 URL for ${pdfS3Key} (expires in 1 hour)`);
+    } catch (urlError) {
+        console.error(`Failed to generate pre-signed URL for ${pdfS3Key}:`, urlError);
+        await updateEmailStatus(analysisId, 'FAILED', `Failed to generate report download link: ${urlError.message}`);
+        return false;
+    }
+
+    const safeFilename = (deckOriginalFilename || `analysis_${analysisId}`).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const subject = `Pitch Deck Analysis Ready - ${deckOriginalFilename}`;
+    const bodyText = `Analysis for your pitch deck "${deckOriginalFilename || 'N/A'}" (Analysis ID: ${analysisId}) is complete.\n\nDownload the PDF report using this secure link (expires in 1 hour):\n${downloadUrl}\n\nIf the link expires, please request a new one through your dashboard.\n\nThank you for using InvestAnalyzer!`;
+    const bodyHtml = `
+        <p>Hello,</p>
+        <p>The analysis for your pitch deck "<strong>${deckOriginalFilename || '<em>N/A</em>'}</strong>" (Analysis ID: ${analysisId}) is complete.</p>
+        <p>You can download the PDF report using the secure link below. Please note, this link will expire in <strong>1 hour</strong>.</p>
+        <p style="text-align: center; margin: 20px 0;">
+            <a href="${downloadUrl}" style="display: inline-block; padding: 12px 25px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">Download Analysis Report (PDF)</a>
+        </p>
+        <p>If you have trouble clicking the button, copy and paste this URL into your browser:</p>
+        <p><a href="${downloadUrl}">${downloadUrl}</a></p>
+        <p>If the link has expired, you can usually regenerate it from your analysis history dashboard.</p>
+        <p>Thank you for using InvestAnalyzer!</p>
+        <p><small><em>InvestAnalyzer Team</em></small></p>`;
+
+    await updateEmailStatus(analysisId, 'SENDING'); // Mark as sending before attempt
+    
+    try {
+        // Create transporter with Gmail SMTP authentication
+        const transporter = createGmailTransporter();
+        
+        // Set up email options
+        const mailOptions = {
+            from: `InvestAnalyzer <${process.env.GMAIL_USER}>`,
+            to: recipientEmail,
             subject: subject,
             text: bodyText,
             html: bodyHtml
-        });
-        console.log(`Completion email sent to ${recipientEmail} for Analysis ID: ${analysisId}`);
+        };
+        
+        // Send the email
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`Completion email sent to ${recipientEmail} via Gmail SMTP for Analysis ID: ${analysisId}. Message ID: ${info.messageId}`);
         await updateEmailStatus(analysisId, 'SENT');
         return true;
     } catch (error) {
-        console.error(`Failed to send completion email to ${recipientEmail} for Analysis ID ${analysisId}:`, error);
-        await updateEmailStatus(analysisId, 'FAILED', error.message);
+        console.error(`Gmail SMTP failed to send email to ${recipientEmail} for Analysis ID ${analysisId}:`, error);
+        const errorMessage = error.message || 'Unknown Gmail SMTP error';
+        await updateEmailStatus(analysisId, 'FAILED', `Gmail SMTP Error: ${errorMessage}`);
         return false;
     }
 }
 
-// --- API Routes ---
-app.use('/api/auth', authRoutes); // Auth routes (public)
-app.use('/api/analysis', analysisRoutes); // Analysis routes (protected within the router)
-app.use('/api/users', userRoutes); // User routes (protected within the router)
+app.use('/api/auth', authRoutes);
+app.use('/api/analysis', analysisRoutes);
+app.use('/api/users', userRoutes);
 
 app.get('/', (req, res) => {
-    res.send('KaroStartup Backend API is running.');
+    res.send('InvestAnalyzer Backend API is running.');
 });
 
-// Update the main upload route to include status updates
 app.post('/api/analysis/upload', authMiddleware, uploadLimiter, (req, res) => {
-    const userId = req.user.userId;
-    const userEmail = req.user.email;
 
-    upload(req, res, async function (err) {
-        if (err) {
-            console.error('Multer error:', err.message);
-            return res.status(400).json({ message: `Upload error: ${err.message}` });
+    upload(req, res, async function (uploadError) {
+        if (uploadError) {
+            console.error('Multer upload error:', uploadError.message);
+            let statusCode = 400;
+             if (uploadError.code === 'LIMIT_FILE_SIZE') { statusCode = 413; }
+            return res.status(statusCode).json({ message: `Upload failed: ${uploadError.message}` });
         }
         if (!req.file) {
-            return res.status(400).json({ message: 'No file uploaded.' });
+            return res.status(400).json({ message: 'No file uploaded. Please attach a .ppt or .pptx file.' });
         }
+        if (!req.user || !req.user.userId || !req.user.email) {
+             console.error("Critical: User info missing in authenticated route /api/analysis/upload");
+             if (req.file && fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch (e) { console.error("Failed to cleanup upload on auth error:", e)} }
+             return res.status(401).json({ message: 'Authentication error: User details not found.' });
+         }
 
+        const userId = req.user.userId;
+        const userEmail = req.user.email;
         const originalFileName = req.file.originalname;
         const localFilePath = req.file.path;
         const s3KeyDeck = req.file.filename;
         let analysisId = null;
         let analysisResult = null;
         let pdfS3Key = null;
-        let stage = "Starting";
-
-        let preInsertClient;
-        try {
-            preInsertClient = await pool.connect();
-            const preInsertQuery = `
-                INSERT INTO analysis_results 
-                (user_id, s3_key, original_filename, processing_status, analysis_data)
-                VALUES ($1, $2, $3, 'PENDING', '{}') RETURNING id;
-            `;
-            const preResult = await preInsertClient.query(preInsertQuery, [userId, s3KeyDeck, originalFileName]);
-            analysisId = preResult.rows[0].id;
-            console.log(`Created initial analysis record ID: ${analysisId} with status PENDING.`);
-        } catch (dbError) {
-            console.error("FATAL: Failed to create initial analysis record in DB:", dbError);
-            if (fs.existsSync(localFilePath)) try { fs.unlinkSync(localFilePath); } catch (e) {}
-            return res.status(500).json({ message: "Failed to initiate analysis process in database." });
-        } finally {
-            if (preInsertClient) preInsertClient.release();
-        }
+        let pdfLocalPath = null;
+        let currentStage = "Initiating";
 
         try {
-            stage = "S3 PPT Upload";
-            await updateAnalysisStatus(analysisId, 'UPLOADING_DECK');
-            await uploadToS3(localFilePath, s3KeyDeck, req.file.mimetype);
-            try { fs.unlinkSync(localFilePath); } catch (e) {}
+             currentStage = "Database Initialization";
+             analysisId = await saveAnalysisToDB(s3KeyDeck, {}, userId, originalFileName);
 
-            stage = "Text Extraction";
-            await updateAnalysisStatus(analysisId, 'EXTRACTING_TEXT');
-            const extractedTextData = await runTextExtraction(s3KeyDeck);
-            const slideCount = extractedTextData.length;
-            if (slideCount < 5 || slideCount > 20) throw new Error(`Invalid slide count: ${slideCount}. Must be 5-20.`);
+             currentStage = "Deck Upload to S3";
+             await updateAnalysisStatus(analysisId, 'UPLOADING_DECK');
+             await uploadToS3(localFilePath, s3KeyDeck, req.file.mimetype);
+             console.log(`Deck ${s3KeyDeck} uploaded for analysis ${analysisId}. Deleting local temp file.`);
+             try { fs.unlinkSync(localFilePath); } catch (e) { console.warn(`Non-critical: Failed to delete local temp upload ${localFilePath}:`, e); }
 
-            stage = "AI Analysis";
-            await updateAnalysisStatus(analysisId, 'ANALYZING_AI');
-            analysisResult = await analyzeWithGemini(extractedTextData);
-
-            stage = "Database Update (Analysis Data)";
-            await updateAnalysisStatus(analysisId, 'SAVING_ANALYSIS');
-            const overallScore = calculateOverallScore(analysisResult);
-            const recommendation = analysisResult?.recommendation || null;
-            const confidence = analysisResult?.confidence_score || null;
-            const updateQuery = `
-                UPDATE analysis_results SET
-                    analysis_data = $1, overall_score = $2, recommendation = $3,
-                    confidence_score = $4, processing_status = 'GENERATING_PDF', updated_at = NOW()
-                WHERE id = $5;
-            `;
-            let updateClient;
-            try {
-                updateClient = await pool.connect();
-                await updateClient.query(updateQuery, [analysisResult, overallScore, recommendation, confidence, analysisId]);
-                console.log(`Updated analysis data in DB for ID: ${analysisId}`);
-            } catch (updateErr) {
-                console.error("DB Update analysis failed:", updateErr);
-                throw new Error("Failed to save analysis details to database.");
-            } finally {
-                if (updateClient) updateClient.release();
+             currentStage = "Text Extraction";
+             await updateAnalysisStatus(analysisId, 'EXTRACTING_TEXT');
+             const extractedTextData = await runTextExtraction(s3KeyDeck);
+            if (!Array.isArray(extractedTextData) || extractedTextData.length === 0) {
+                 throw new Error("Text extraction yielded no slides or invalid data.");
             }
+             const slideCount = extractedTextData.length;
+             console.log(`Extracted text from ${slideCount} slides for analysis ${analysisId}.`);
+              if (slideCount < 3 || slideCount > 30) {
+                console.warn(`Analysis ${analysisId}: Slide count (${slideCount}) outside recommended range (3-30).`);
+              }
 
-            stage = "PDF Generation";
-            const { localPath: pdfLocalPath, reportFilename: pdfReportFilename } = await generateInvestmentThesisPDF(analysisResult, analysisId, originalFileName);
 
-            stage = "S3 PDF Upload";
-            await updateAnalysisStatus(analysisId, 'UPLOADING_PDF');
-            pdfS3Key = `reports/${pdfReportFilename}`;
-            await uploadToS3(pdfLocalPath, pdfS3Key, 'application/pdf');
-            try { fs.unlinkSync(pdfLocalPath); } catch (e) {}
+             currentStage = "AI Analysis";
+             await updateAnalysisStatus(analysisId, 'ANALYZING_AI');
+             analysisResult = await analyzeWithGemini(extractedTextData);
+             console.log(`AI analysis completed for analysis ${analysisId}. Recommendation: ${analysisResult?.recommendation}`);
 
-            stage = "Database Update (PDF Key & Complete)";
-            await updatePdfKeyInDB(analysisId, pdfS3Key);
 
-            stage = "Email Notification";
-            await sendCompletionEmail(userEmail, analysisId, s3KeyDeck, pdfS3Key);
+             currentStage = "Saving Analysis Results";
+             await updateAnalysisStatus(analysisId, 'SAVING_ANALYSIS');
+             await updateAnalysisResultInDB(analysisId, analysisResult);
 
-            console.log(`Process completed for Analysis ID: ${analysisId}`);
-            res.status(200).json({
-                message: `File processed, analyzed, and report generated successfully. Notification sent to ${userEmail}.`,
-                s3KeyDeck: s3KeyDeck,
+
+             currentStage = "PDF Generation";
+             await updateAnalysisStatus(analysisId, 'GENERATING_PDF');
+             const { localPath, reportFilename } = await generateInvestmentThesisPDF(analysisResult, analysisId, originalFileName);
+            pdfLocalPath = localPath;
+             pdfS3Key = `reports/${reportFilename}`;
+             console.log(`PDF report generated locally for analysis ${analysisId}: ${pdfLocalPath}`);
+
+
+             currentStage = "PDF Upload to S3";
+             await updateAnalysisStatus(analysisId, 'UPLOADING_PDF');
+             await uploadToS3(pdfLocalPath, pdfS3Key, 'application/pdf');
+             console.log(`PDF report ${pdfS3Key} uploaded for analysis ${analysisId}. Deleting local temp report.`);
+             try { if (pdfLocalPath && fs.existsSync(pdfLocalPath)) fs.unlinkSync(pdfLocalPath); pdfLocalPath = null; } catch (e) { console.warn(`Non-critical: Failed to delete local temp report ${pdfLocalPath}:`, e); }
+
+
+             currentStage = "Finalizing Database Record";
+             await updatePdfKeyAndComplete(analysisId, pdfS3Key); // Sets status to COMPLETED
+
+
+             currentStage = "Email Notification";
+             await sendCompletionEmail(userEmail, analysisId, originalFileName, pdfS3Key);
+
+
+             console.log(`Analysis process fully completed for ID: ${analysisId}`);
+             res.status(200).json({
+                 message: "Analysis complete. Report generated and notification potentially sent.", // Updated msg
+                 analysisId: analysisId,
+                 s3KeyDeck: s3KeyDeck,
+                 pdfReportKey: pdfS3Key,
+                 recommendation: analysisResult?.recommendation || "N/A",
+                 overallScore: analysisResult?.overall_score ?? 'N/A'
+             });
+
+         } catch (error) {
+            console.error(`PROCESSING FAILED [Analysis ID: ${analysisId || 'N/A'}, User: ${userId}] at Stage [${currentStage}]:`, error);
+             const clientErrorMessage = `Processing failed during '${currentStage}'. Please check server logs for details. Error: ${error.message}`; // Give slightly more info
+
+
+             if (analysisId) {
+                 // Pass error message for potential logging if DB column exists
+                 await updateAnalysisStatus(analysisId, 'FAILED', error.message);
+             }
+
+             if (localFilePath && fs.existsSync(localFilePath)) {
+                 try { fs.unlinkSync(localFilePath); console.log("Cleaned up temp upload file after error."); } catch (e) { console.error("Error cleaning up temp upload file:", e)}
+             }
+             if (pdfLocalPath && fs.existsSync(pdfLocalPath)) {
+                  try { fs.unlinkSync(pdfLocalPath); console.log("Cleaned up temp report file after error."); } catch (e) { console.error("Error cleaning up temp report file:", e)}
+             }
+
+             res.status(500).json({
+                message: clientErrorMessage,
                 analysisId: analysisId,
-                pdfReportKey: pdfS3Key,
-                recommendation: analysisResult?.recommendation || "N/A"
+                stageFailed: currentStage
             });
-
-        } catch (error) {
-            console.error(`PROCESSING FAILED [ID: ${analysisId}, User: ${userId}] at stage [${stage}]:`, error);
-            if (analysisId) {
-                await updateAnalysisStatus(analysisId, 'FAILED');
-            }
-            if (fs.existsSync(localFilePath)) { try { fs.unlinkSync(localFilePath); } catch (e) {} }
-            res.status(500).json({ message: `Processing failed during ${stage}: ${error.message}`, analysisId: analysisId });
         }
     });
 });
 
-// --- Start Server ---
+app.post('/api/analysis/validate-slides', authMiddleware, (req, res) => {
+  upload(req, res, async function(uploadError) {
+    if (uploadError) {
+      console.error('Validation upload error:', uploadError.message);
+      let statusCode = 400;
+      if (uploadError.code === 'LIMIT_FILE_SIZE') {
+        statusCode = 413;
+      }
+      return res.status(statusCode).json({ 
+        error: true, 
+        message: `Upload failed: ${uploadError.message}` 
+      });
+    }
+
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ 
+        error: true, 
+        message: 'No file uploaded. Please attach a .ppt or .pptx file.' 
+      });
+    }
+
+    const localFilePath = req.file.path;
+    console.log(`Validating slide count for ${req.file.originalname} at ${localFilePath}`);
+
+    try {
+      // Execute Python script to count slides only
+      const pythonExecutable = process.env.PYTHON_EXECUTABLE || 'python';
+      console.log(`Executing Python extract_text.py for file: ${localFilePath} (count only: true)`);
+      
+      const pythonProcess = spawn(pythonExecutable, ['extract_text.py', localFilePath, 'count_only'], { cwd: __dirname });
+      
+      let scriptOutput = "";
+      let scriptError = "";
+      
+      pythonProcess.stdout.on('data', (data) => {
+        scriptOutput += data.toString();
+      });
+      
+      pythonProcess.stderr.on('data', (data) => {
+        scriptError += data.toString();
+        // We'll still log stderr, as it might contain debugging info
+        console.log("Python stderr:", scriptError);
+      });
+
+      pythonProcess.on('close', async (code) => {
+        console.log(`Python process exited with code ${code}`);
+        
+        // Clean up the uploaded file regardless of outcome
+        try {
+          if (fs.existsSync(localFilePath)) {
+            fs.unlinkSync(localFilePath);
+          }
+        } catch (cleanupErr) {
+          console.warn(`Non-critical: Failed to delete temp file ${localFilePath}:`, cleanupErr);
+        }
+        
+        if (code === 0) {
+          try {
+            // Parse the JSON output from Python
+            const result = JSON.parse(scriptOutput);
+            
+            if (result.error) {
+              return res.status(400).json({ 
+                error: true, 
+                message: `Slide validation failed: ${result.error}` 
+              });
+            }
+            
+            if (!result.data || typeof result.data.slideCount !== 'number') {
+              return res.status(400).json({ 
+                error: true, 
+                message: 'Invalid response format from slide validation'
+              });
+            }
+            
+            const slideCount = result.data.slideCount;
+            console.log(`Slide count for ${req.file.originalname}: ${slideCount}`);
+            
+            // Return success response
+            return res.status(200).json({
+              error: false,
+              slideCount: slideCount,
+              message: `Slide validation complete. File has ${slideCount} slides.`
+            });
+          } catch (e) {
+            console.error("Failed to parse Python script output:", e, "\nOutput was:", scriptOutput);
+            return res.status(500).json({ 
+              error: true, 
+              message: `Failed to parse validation result: ${e.message}`
+            });
+          }
+        } else {
+          console.error(`Python script failed with code ${code}. Stderr: ${scriptError}`);
+          return res.status(500).json({ 
+            error: true, 
+            message: 'Failed to validate slides. Python script error.'
+          });
+        }
+      });
+      
+      pythonProcess.on('error', (error) => {
+        console.error(`Failed to start Python process: ${error.message}`);
+        // Clean up the uploaded file
+        try {
+          if (fs.existsSync(localFilePath)) {
+            fs.unlinkSync(localFilePath);
+          }
+        } catch (cleanupErr) {
+          console.warn(`Non-critical: Failed to delete temp file ${localFilePath}:`, cleanupErr);
+        }
+        
+        return res.status(500).json({ 
+          error: true, 
+          message: `Failed to start slide validation process: ${error.message}` 
+        });
+      });
+      
+    } catch (error) {
+      console.error(`Slide validation failed:`, error);
+      // Clean up the uploaded file
+      try {
+        if (fs.existsSync(localFilePath)) {
+          fs.unlinkSync(localFilePath);
+        }
+      } catch (cleanupErr) {
+        console.warn(`Non-critical: Failed to delete temp file ${localFilePath}:`, cleanupErr);
+      }
+      
+      return res.status(500).json({ 
+        error: true, 
+        message: `Server error during slide validation: ${error.message}` 
+      });
+    }
+  });
+});
+
 app.listen(PORT, () => {
     console.log(`Backend server running on http://localhost:${PORT}`);
 });
 
-// Optional: Graceful shutdown handling
 process.on('SIGINT', () => {
-  console.log('SIGINT signal received: closing HTTP server');
-  process.exit(0);
+  console.log('SIGINT signal received: Closing HTTP server and DB pool.');
+  app.close(() => { // Assuming 'app' is the server instance returned by app.listen() if needed
+      console.log('HTTP server closed.');
+      pool.end(() => {
+        console.log('Database pool closed.');
+        process.exit(0);
+      });
+  });
+
+  setTimeout(() => {
+    console.error('Graceful shutdown timed out, forcing exit.');
+    process.exit(1);
+   }, 5000);
 });

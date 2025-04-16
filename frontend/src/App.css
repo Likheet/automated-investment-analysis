@@ -230,7 +230,7 @@ a.link-animated:hover::after {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 var(--spacing-xl);
+  padding: 0 var(--spacing-2xl);
   background-color: var(--header-bg);
   border-bottom: 1px solid var(--header-border);
   box-shadow: var(--shadow-sm);
@@ -238,9 +238,20 @@ a.link-animated:hover::after {
   top: 0;
   z-index: 100;
   width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
   transition: height 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+.header .container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: var(--container-width);
+  margin: 0 auto;
 }
 
 .header.scrolled {

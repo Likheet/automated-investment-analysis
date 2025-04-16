@@ -385,6 +385,7 @@ const FileUpload: React.FC = () => {
   const { theme } = useTheme();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const browseTextRef = useRef<HTMLSpanElement>(null);
+  const progressBarRef = useRef<HTMLDivElement>(null);
 
   // Refs for the parallax effect
   const cardRef = useRef<HTMLDivElement>(null);
@@ -395,6 +396,32 @@ const FileUpload: React.FC = () => {
   const [analysisStatus, setAnalysisStatus] = useState<string | null>(null);
   const [showProgress, setShowProgress] = useState<boolean>(false);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Function to scroll progress bar to center of viewport
+  const scrollProgressBarToCenter = () => {
+    if (progressBarRef.current) {
+      // Wait a tiny bit for the progress bar to render
+      setTimeout(() => {
+        if (progressBarRef.current) {
+          // Get the progress bar's position relative to the viewport
+          const rect = progressBarRef.current.getBoundingClientRect();
+          
+          // Calculate where to scroll to center the element in the viewport
+          const scrollTop = 
+            window.pageYOffset + // Current scroll position
+            rect.top + // Element's position relative to the viewport
+            (rect.height / 2) - // Half the element's height
+            (window.innerHeight / 2); // Half the viewport height
+          
+          // Scroll to position smoothly
+          window.scrollTo({
+            top: scrollTop,
+            behavior: 'smooth'
+          });
+        }
+      }, 100);
+    }
+  };
 
   // Function implementations
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
@@ -440,7 +467,7 @@ const FileUpload: React.FC = () => {
     }
   };
 
-  const handleFile = (file: File) => {
+  const handleFile = async (file: File) => {
     // Check file type
     const validTypes = [
       'application/vnd.ms-powerpoint',
@@ -462,9 +489,55 @@ const FileUpload: React.FC = () => {
       setMessageType('error');
       return;
     }
-    
-    setSelectedFile(file);
-    setMessage('');
+
+    // Validate slide count before accepting the file
+    try {
+      setIsLoading(true);
+      setMessage('Validating presentation...');
+      setMessageType('info');
+      const formData = new FormData();
+      formData.append('pitchDeck', file);
+      const response = await axios.post('/api/analysis/validate-slides', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      // Use slideCount from backend and check range here
+      const { slideCount } = response.data;
+      if (typeof slideCount !== 'number') {
+        setMessage('Could not determine slide count. Please try again.');
+        setMessageType('error');
+        setIsLoading(false);
+        return;
+      }
+      if (slideCount < 5) {
+        setMessage(`Slides too low: Your presentation has ${slideCount} slides. Minimum is 5.`);
+        setMessageType('error');
+        setIsLoading(false);
+        return;
+      }
+      if (slideCount > 35) {
+        setMessage(`Slides too high: Your presentation has ${slideCount} slides. Maximum is 35.`);
+        setMessageType('error');
+        setIsLoading(false);
+        return;
+      }
+      // If validation passed, clear the info message
+      setMessage('');
+      setSelectedFile(file);
+    } catch (error) {
+      console.error('Validation error:', error);
+      
+      if (axios.isAxiosError(error) && error.response) {
+        setMessage(`Validation failed: ${error.response.data.message || 'Could not validate slide count'}`);
+      } else {
+        setMessage('Could not validate presentation. Please try again.');
+      }
+      setMessageType('error');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleUpload = async () => {
@@ -475,6 +548,9 @@ const FileUpload: React.FC = () => {
     // Show progress immediately with initial status
     setAnalysisStatus('UPLOADING_DECK');
     setShowProgress(true);
+
+    // Scroll to center the progress bar in the viewport
+    scrollProgressBarToCenter();
 
     // Create form data
     const formData = new FormData();
@@ -704,7 +780,7 @@ const FileUpload: React.FC = () => {
         )}
         
         {showProgress && (
-          <div style={styles.progressContainer}>
+          <div style={styles.progressContainer} ref={progressBarRef}>
             <ProgressBar 
               status={analysisStatus} 
               analysisId={analysisId}
@@ -764,7 +840,7 @@ const FileUpload: React.FC = () => {
             </p>
             
             <p style={styles.fileSpecs}>
-              Supports PowerPoint files (.ppt, .pptx) up to 50MB
+              Supports PowerPoint files (.ppt, .pptx) up to 50MB and must contain 5-35 slides
             </p>
           </div>
         )}
