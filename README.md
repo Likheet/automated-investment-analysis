@@ -1,5 +1,5 @@
 ## Demo
-See the demo video: [Watch Demo](https://github.com/user-attachments/assets/46941836-1e6b-4778-b579-dc0c74d61b38)
+https://github.com/user-attachments/assets/46941836-1e6b-4778-b579-dc0c74d61b38
 
 
 # InvestAnalyzer: Automated Investment Thesis Generator
